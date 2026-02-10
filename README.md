@@ -36,37 +36,51 @@ Stripe Test Mode → Batch ETL (Python) → BigQuery → FastAPI → React Dashb
 
 ## Setup
 
-1. Copy `.env.example` to `.env` and fill in your credentials:
-   ```
-   cp .env.example .env
-   ```
+### 1. Credentials
 
-2. Install Python dependencies:
-   ```
-   uv sync
-   ```
+You need two files that are **not** in the repo (they contain secrets):
 
-3. Run the pipeline steps in order:
-   ```bash
-   # Step 1: Create Stripe products and prices
-   uv run python scripts/seed_prices.py
+| File | What it is | How to get it |
+|------|-----------|---------------|
+| `.env` | Environment variables (Stripe key, GCP project ID) | Copy `.env.example` → `.env` and fill in values |
+| `service-account.json` | GCP service account key | GCP Console → IAM & Admin → Service Accounts → Create Key → JSON → download and place in project root |
 
-   # Step 1b: Generate test customers (update price IDs in script first)
-   uv run python scripts/generate_data.py
+```bash
+cp .env.example .env
+# Edit .env with your Stripe secret key and GCP project ID
+# Place your GCP service account JSON file as service-account.json in the project root
+```
 
-   # Step 2: Extract data from Stripe and load into BigQuery
-   uv run python etl/extract_load.py
+The GCP service account needs these roles: **BigQuery Data Editor** + **BigQuery User**.
 
-   # Step 3: Create BigQuery views (run SQL files in BigQuery Console)
+### 2. Install dependencies
 
-   # Step 4: Start the API server
-   uv run uvicorn api.main:app --port 8888 --reload
+```bash
+uv sync
+```
 
-   # Step 5: Start the dashboard (in another terminal)
-   cd dashboard && npm install && npm run dev
-   ```
+### 3. Run the pipeline
 
-4. Open `http://localhost:5173` to view the dashboard.
+```bash
+# Step 1a: Create Stripe products and prices
+uv run python scripts/seed_prices.py
+
+# Step 1b: Generate 100 test customers with 6 months of billing history
+uv run python scripts/generate_data.py
+
+# Step 2+3: Extract from Stripe, load to BigQuery, and create views
+uv run python etl/extract_load.py
+
+# Step 4: Start the API server
+uv run uvicorn api.main:app --port 8888 --reload
+
+# Step 5: Start the dashboard (in another terminal)
+cd dashboard && npm install && npm run dev
+```
+
+### 4. Open the dashboard
+
+Open `http://localhost:5173` to view the dashboard.
 
 ## Dashboard Metrics
 
