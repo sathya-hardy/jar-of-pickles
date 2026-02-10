@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+dashboard/dist/
+.venv/
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.app.json
+!tsconfig.node.json
+!tailwind.config.js
+.uv/
+uv.lock

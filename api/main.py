@@ -1,0 +1,83 @@
+"""
+main.py — FastAPI backend for the MRR Dashboard.
+
+Thin API layer that queries BigQuery views and returns JSON.
+Run: uv run uvicorn api.main:app --port 8888 --reload
+"""
+
+import os
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from google.cloud import bigquery
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = FastAPI(title="MRR Dashboard API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
+
+PROJECT_ID = os.getenv("GCP_PROJECT_ID")
+DATASET = os.getenv("BQ_DATASET", "stripe_mrr")
+
+bq_client = bigquery.Client(project=PROJECT_ID)
+
+
+def query_bq(sql: str) -> list[dict]:
+    """Run a BigQuery query and return results as list of dicts."""
+    results = bq_client.query(sql).result()
+    return [dict(row) for row in results]
+
+
+@app.get("/api/mrr")
+def get_mrr():
+    """Monthly MRR time series."""
+    data = query_bq(f"""
+        SELECT
+            FORMAT_DATE('%Y-%m', month) AS month,
+            mrr_amount,
+            paying_customers,
+            total_customers,
+            active_subscriptions
+        FROM `{PROJECT_ID}.{DATASET}.mrr_monthly`
+        ORDER BY month ASC
+    """)
+    return {"data": data}
+
+
+@app.get("/api/mrr-by-plan")
+def get_mrr_by_plan():
+    """MRR broken down by plan tier per month."""
+    data = query_bq(f"""
+        SELECT
+            FORMAT_DATE('%Y-%m', month) AS month,
+            plan_name,
+            mrr_amount
+        FROM `{PROJECT_ID}.{DATASET}.mrr_by_plan`
+        ORDER BY month ASC, plan_name ASC
+    """)
+    return {"data": data}
+
+
+@app.get("/api/arpu")
+def get_arpu():
+    """ARPPU (Average Revenue Per Paying User) time series."""
+    data = query_bq(f"""
+        SELECT
+            FORMAT_DATE('%Y-%m', month) AS month,
+            arppu
+        FROM `{PROJECT_ID}.{DATASET}.arppu_monthly`
+        ORDER BY month ASC
+    """)
+    return {"data": data}
+
+
+@app.get("/api/health")
+def health():
+    """Health check."""
+    return {"status": "ok"}
