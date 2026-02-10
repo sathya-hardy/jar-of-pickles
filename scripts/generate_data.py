@@ -61,19 +61,8 @@ CUSTOMER_PLANS = (
     + ["enterprise"] * 10
 )
 
-# Upgrade paths (from -> to)
-UPGRADE_PATHS = [
-    ("free", "standard"),
-    ("standard", "pro_plus"),
-    ("pro_plus", "engage"),
-    ("engage", "enterprise"),
-]
-
-# Downgrade paths
-DOWNGRADE_PATHS = [
-    ("standard", "free"),
-    ("pro_plus", "standard"),
-]
+# Ordered tiers from lowest to highest
+TIER_ORDER = ["free", "standard", "pro_plus", "engage", "enterprise"]
 
 # How many of each event
 NUM_UPGRADES = 15
@@ -157,20 +146,20 @@ def create_customer_with_sub(clock_id, customer_index, plan):
 
 
 def select_upgrade_candidates(customers):
-    """Select ~15 customers to upgrade. Prefer lower tiers."""
+    """Select ~15 customers to upgrade. Any tier below enterprise is eligible."""
     eligible = [
         c for c in customers
-        if c["plan"] in [p[0] for p in UPGRADE_PATHS] and not c["cancelled"]
+        if c["plan"] != "enterprise" and not c["cancelled"]
     ]
     random.shuffle(eligible)
     return eligible[:NUM_UPGRADES]
 
 
 def select_downgrade_candidates(customers):
-    """Select ~2 customers to downgrade."""
+    """Select ~2 customers to downgrade. Any tier above free is eligible."""
     eligible = [
         c for c in customers
-        if c["plan"] in [p[0] for p in DOWNGRADE_PATHS] and not c["cancelled"]
+        if c["plan"] != "free" and not c["cancelled"]
     ]
     random.shuffle(eligible)
     return eligible[:NUM_DOWNGRADES]
@@ -193,27 +182,40 @@ def select_cancel_candidates(customers):
 
 
 def apply_upgrade(customer_info):
-    """Upgrade a customer to the next tier or increase screen count."""
+    """Upgrade a customer to any higher tier or increase screen count."""
     current_plan = customer_info["plan"]
+    current_idx = TIER_ORDER.index(current_plan)
 
     # 50% chance: plan upgrade, 50% chance: screen increase
     if random.random() < 0.5:
-        upgrade_map = dict(UPGRADE_PATHS)
-        new_plan = upgrade_map.get(current_plan)
-        if new_plan:
+        # Pick any tier above current — weighted toward adjacent tiers
+        higher_tiers = TIER_ORDER[current_idx + 1:]
+        if higher_tiers:
+            # Weight: adjacent tier most likely, further tiers less likely
+            # e.g. from free: standard=4, pro_plus=3, engage=2, enterprise=1
+            weights = list(range(len(higher_tiers), 0, -1))
+            new_plan = random.choices(higher_tiers, weights=weights, k=1)[0]
+
+            new_screens = customer_info["screens"]
+            # Adjust screen count to fit new plan's range if needed
+            min_screens = SCREEN_RANGES[new_plan][0]
+            if new_screens < min_screens:
+                new_screens = random.randint(min_screens, SCREEN_RANGES[new_plan][1])
+
             sub = stripe.Subscription.retrieve(customer_info["subscription_id"])
             stripe.Subscription.modify(
                 customer_info["subscription_id"],
                 items=[{
                     "id": sub["items"]["data"][0].id,
                     "price": PRICE_IDS[new_plan],
-                    "quantity": customer_info["screens"],
+                    "quantity": new_screens,
                 }],
                 proration_behavior="create_prorations",
             )
             sleep()
             print(f"    Upgraded #{customer_info['index']:03d}: {current_plan} -> {new_plan}")
             customer_info["plan"] = new_plan
+            customer_info["screens"] = new_screens
             return
     # Screen increase
     new_screens = customer_info["screens"] + random.randint(2, 10)
@@ -235,12 +237,19 @@ def apply_upgrade(customer_info):
 
 
 def apply_downgrade(customer_info):
-    """Downgrade a customer to a lower tier."""
+    """Downgrade a customer to any lower tier."""
     current_plan = customer_info["plan"]
-    downgrade_map = dict(DOWNGRADE_PATHS)
-    new_plan = downgrade_map.get(current_plan)
-    if not new_plan:
+    current_idx = TIER_ORDER.index(current_plan)
+
+    # Pick any tier below current — weighted toward adjacent tiers
+    lower_tiers = TIER_ORDER[:current_idx]
+    if not lower_tiers:
         return
+
+    # Weight: adjacent tier most likely, further tiers less likely
+    # e.g. from enterprise: engage=4, pro_plus=3, standard=2, free=1
+    weights = list(range(1, len(lower_tiers) + 1))
+    new_plan = random.choices(lower_tiers, weights=weights, k=1)[0]
 
     new_screens = min(customer_info["screens"], SCREEN_RANGES[new_plan][1])
 
