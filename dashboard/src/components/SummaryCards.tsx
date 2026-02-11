@@ -26,8 +26,8 @@ export function SummaryCards() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/mrr').then(r => r.json()),
-      fetch('/api/arpu').then(r => r.json()),
+      fetch('api/mrr').then(r => r.json()),
+      fetch('api/arpu').then(r => r.json()),
     ])
       .then(([mrrJson, arpuJson]) => {
         setMrrData(mrrJson.data)

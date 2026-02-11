@@ -53,22 +53,38 @@ def ensure_dataset():
 
 
 def extract_invoices():
-    """Extract all invoices from Stripe, return list of dicts."""
+    """Extract all invoices from Stripe, return list of dicts.
+
+    Uses Search API because test clock objects are hidden from list endpoints.
+    Line items are fetched per invoice since search doesn't support expand.
+    """
     print("Extracting invoices from Stripe...")
     rows = []
-    invoices = stripe.Invoice.list(limit=100, expand=["data.lines.data"])
+    invoices = stripe.Invoice.search(
+        query="status:'paid' OR status:'open' OR status:'void' OR status:'uncollectible'",
+        limit=100,
+    )
 
     for inv in invoices.auto_paging_iter():
         price_id = None
-        if inv.lines and inv.lines.data:
-            first_line = inv.lines.data[0]
-            if first_line.price:
-                price_id = first_line.price.id
+        # Fetch line items separately (search doesn't support expand)
+        lines = stripe.Invoice.list_lines(inv.id, limit=1)
+        if lines.data:
+            first_line = lines.data[0]
+            pricing = getattr(first_line, "pricing", None)
+            if pricing and pricing.get("price_details"):
+                price_id = pricing["price_details"].get("price")
+
+        # subscription_id is nested under parent.subscription_details
+        subscription_id = None
+        parent = getattr(inv, "parent", None)
+        if parent and parent.get("subscription_details"):
+            subscription_id = parent["subscription_details"].get("subscription")
 
         rows.append({
             "invoice_id": inv.id,
             "customer_id": inv.customer,
-            "subscription_id": inv.subscription,
+            "subscription_id": subscription_id,
             "status": inv.status,
             "amount_paid": inv.amount_paid,
             "currency": inv.currency,
@@ -83,10 +99,16 @@ def extract_invoices():
 
 
 def extract_subscriptions():
-    """Extract all subscriptions from Stripe, return list of dicts."""
+    """Extract all subscriptions from Stripe, return list of dicts.
+
+    Uses Search API because test clock objects are hidden from list endpoints.
+    """
     print("Extracting subscriptions from Stripe...")
     rows = []
-    subs = stripe.Subscription.list(limit=100, status="all")
+    subs = stripe.Subscription.search(
+        query="status:'active' OR status:'canceled' OR status:'past_due' OR status:'incomplete'",
+        limit=100,
+    )
 
     for sub in subs.auto_paging_iter():
         item = sub["items"]["data"][0]
@@ -98,8 +120,8 @@ def extract_subscriptions():
             "price_amount": item.price.unit_amount,
             "price_interval": item.price.recurring.interval if item.price.recurring else None,
             "quantity": item.quantity,
-            "current_period_start": datetime.fromtimestamp(sub.current_period_start, tz=timezone.utc),
-            "current_period_end": datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc),
+            "current_period_start": datetime.fromtimestamp(item.current_period_start, tz=timezone.utc),
+            "current_period_end": datetime.fromtimestamp(item.current_period_end, tz=timezone.utc),
             "created": datetime.fromtimestamp(sub.created, tz=timezone.utc),
             "canceled_at": (
                 datetime.fromtimestamp(sub.canceled_at, tz=timezone.utc)

@@ -22,7 +22,7 @@ export function CustomerChart() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/api/mrr')
+    fetch('api/mrr')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()

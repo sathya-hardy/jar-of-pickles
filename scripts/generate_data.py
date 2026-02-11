@@ -128,7 +128,6 @@ def create_customer_with_sub(clock_id, customer_index, plan):
     sub = stripe.Subscription.create(
         customer=customer.id,
         items=[{"price": PRICE_IDS[plan], "quantity": screen_count}],
-        payment_behavior="default_incomplete",
         payment_settings={"payment_method_types": ["card"]},
         metadata={"initial_plan": plan, "initial_screens": str(screen_count)},
     )
@@ -183,6 +182,12 @@ def select_cancel_candidates(customers):
 
 def apply_upgrade(customer_info):
     """Upgrade a customer to any higher tier or increase screen count."""
+    sub = stripe.Subscription.retrieve(customer_info["subscription_id"])
+    if sub.status in ("canceled", "incomplete_expired"):
+        print(f"    Skipping #{customer_info['index']:03d}: subscription {sub.status}")
+        customer_info["cancelled"] = True
+        return
+
     current_plan = customer_info["plan"]
     current_idx = TIER_ORDER.index(current_plan)
 
@@ -202,7 +207,6 @@ def apply_upgrade(customer_info):
             if new_screens < min_screens:
                 new_screens = random.randint(min_screens, SCREEN_RANGES[new_plan][1])
 
-            sub = stripe.Subscription.retrieve(customer_info["subscription_id"])
             stripe.Subscription.modify(
                 customer_info["subscription_id"],
                 items=[{
@@ -222,7 +226,6 @@ def apply_upgrade(customer_info):
     max_screens = SCREEN_RANGES[current_plan][1]
     new_screens = min(new_screens, max_screens + 20)
 
-    sub = stripe.Subscription.retrieve(customer_info["subscription_id"])
     stripe.Subscription.modify(
         customer_info["subscription_id"],
         items=[{
@@ -238,6 +241,12 @@ def apply_upgrade(customer_info):
 
 def apply_downgrade(customer_info):
     """Downgrade a customer to any lower tier."""
+    sub = stripe.Subscription.retrieve(customer_info["subscription_id"])
+    if sub.status in ("canceled", "incomplete_expired"):
+        print(f"    Skipping #{customer_info['index']:03d}: subscription {sub.status}")
+        customer_info["cancelled"] = True
+        return
+
     current_plan = customer_info["plan"]
     current_idx = TIER_ORDER.index(current_plan)
 
@@ -253,7 +262,6 @@ def apply_downgrade(customer_info):
 
     new_screens = min(customer_info["screens"], SCREEN_RANGES[new_plan][1])
 
-    sub = stripe.Subscription.retrieve(customer_info["subscription_id"])
     stripe.Subscription.modify(
         customer_info["subscription_id"],
         items=[{
