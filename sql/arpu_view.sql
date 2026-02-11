@@ -1,8 +1,9 @@
 -- arpu_view.sql
+-- REFERENCE ONLY — this file is NOT executed directly.
+-- The ETL script (etl/extract_load.py) creates this view automatically.
+--
 -- ARPPU (Average Revenue Per Paying User) per month.
 -- Uses paying customers only (excludes free tier) for actionable pricing insight.
---
--- IMPORTANT: Replace PROJECT_ID with your actual GCP project ID.
 
 CREATE OR REPLACE VIEW `PROJECT_ID.stripe_mrr.arppu_monthly` AS
 SELECT

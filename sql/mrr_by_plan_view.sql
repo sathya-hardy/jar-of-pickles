@@ -1,9 +1,10 @@
 -- mrr_by_plan_view.sql
+-- REFERENCE ONLY — this file is NOT executed directly.
+-- The ETL script (etl/extract_load.py) creates this view automatically
+-- with real price IDs from config/stripe_prices.json.
+--
 -- MRR broken down by plan tier per month.
 -- Uses price_id from invoice line items for historically accurate plan attribution.
---
--- IMPORTANT: Replace PROJECT_ID with your actual GCP project ID.
--- IMPORTANT: Replace the price_XXXXX values with actual Price IDs from seed_prices.py output.
 
 CREATE OR REPLACE VIEW `PROJECT_ID.stripe_mrr.mrr_by_plan` AS
 SELECT

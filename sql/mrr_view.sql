@@ -1,8 +1,9 @@
 -- mrr_view.sql
+-- REFERENCE ONLY — this file is NOT executed directly.
+-- The ETL script (etl/extract_load.py) creates this view automatically.
+--
 -- Monthly MRR aggregation from paid subscription invoices.
 -- Amounts are stored in cents in Stripe; converted to dollars here.
---
--- IMPORTANT: Replace PROJECT_ID with your actual GCP project ID.
 
 CREATE OR REPLACE VIEW `PROJECT_ID.stripe_mrr.mrr_monthly` AS
 WITH paid_invoices AS (
