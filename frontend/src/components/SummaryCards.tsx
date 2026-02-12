@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { DollarSign, TrendingUp, Users, BarChart3 } from 'lucide-react'
 
 interface MrrDataPoint {
   month: string
@@ -49,11 +50,11 @@ export function SummaryCards() {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-4 gap-4 h-full">
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 animate-pulse">
-            <div className="h-4 bg-gray-200 rounded w-24 mb-3"></div>
-            <div className="h-8 bg-gray-200 rounded w-32"></div>
+          <div key={i} className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 animate-pulse transition-colors duration-200">
+            <div className="h-3 bg-gray-200 dark:bg-slate-600 rounded w-20 mb-3"></div>
+            <div className="h-6 bg-gray-200 dark:bg-slate-600 rounded w-28"></div>
           </div>
         ))}
       </div>
@@ -62,9 +63,8 @@ export function SummaryCards() {
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-6">
-        <p className="text-red-600 font-medium">Failed to load dashboard data</p>
-        <p className="text-red-500 text-sm mt-1">{error}</p>
+      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 h-full flex items-center">
+        <p className="text-red-600 dark:text-red-400 text-sm font-medium">Failed to load: {error}</p>
       </div>
     )
   }
@@ -81,39 +81,66 @@ export function SummaryCards() {
   const cards = [
     {
       label: 'Current MRR',
-      value: latest ? formatDollar(latest.mrr_amount) : '—',
-      color: 'text-indigo-600',
+      value: latest ? formatDollar(latest.mrr_amount) : '\u2014',
+      icon: DollarSign,
+      iconColor: 'text-indigo-600 dark:text-indigo-400',
+      iconBg: 'bg-indigo-50 dark:bg-indigo-900/30',
     },
     {
       label: 'MoM Growth',
       value: momGrowth !== null
         ? `${momGrowth >= 0 ? '+' : ''}${momGrowth.toFixed(1)}%`
-        : '—',
-      color: momGrowth !== null && momGrowth >= 0 ? 'text-green-600' : momGrowth !== null ? 'text-red-600' : 'text-gray-400',
+        : '\u2014',
+      icon: TrendingUp,
+      iconColor: momGrowth !== null && momGrowth >= 0
+        ? 'text-emerald-600 dark:text-emerald-400'
+        : 'text-red-600 dark:text-red-400',
+      iconBg: momGrowth !== null && momGrowth >= 0
+        ? 'bg-emerald-50 dark:bg-emerald-900/30'
+        : 'bg-red-50 dark:bg-red-900/30',
+      valueColor: momGrowth !== null && momGrowth >= 0
+        ? 'text-emerald-600 dark:text-emerald-400'
+        : momGrowth !== null
+          ? 'text-red-600 dark:text-red-400'
+          : undefined,
     },
     {
       label: 'Paying Customers',
-      value: latest ? latest.paying_customers.toString() : '—',
-      color: 'text-blue-600',
+      value: latest ? latest.paying_customers.toString() : '\u2014',
+      icon: Users,
+      iconColor: 'text-sky-600 dark:text-sky-400',
+      iconBg: 'bg-sky-50 dark:bg-sky-900/30',
     },
     {
       label: 'ARPPU',
-      value: latestArpu ? formatDollarDecimal(latestArpu.arppu) : '—',
-      color: 'text-purple-600',
+      value: latestArpu ? formatDollarDecimal(latestArpu.arppu) : '\u2014',
+      icon: BarChart3,
+      iconColor: 'text-teal-600 dark:text-teal-400',
+      iconBg: 'bg-teal-50 dark:bg-teal-900/30',
     },
   ]
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      {cards.map((card) => (
-        <div
-          key={card.label}
-          className="bg-white rounded-xl shadow-sm border border-gray-200 p-6"
-        >
-          <p className="text-sm font-medium text-gray-500">{card.label}</p>
-          <p className={`text-2xl font-bold mt-1 ${card.color}`}>{card.value}</p>
-        </div>
-      ))}
+    <div className="grid grid-cols-4 gap-4 h-full">
+      {cards.map((card) => {
+        const Icon = card.icon
+        return (
+          <div
+            key={card.label}
+            className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 flex items-center gap-3 transition-colors duration-200"
+          >
+            <div className={`p-2 rounded-lg ${card.iconBg} transition-colors duration-200`}>
+              <Icon className={`w-5 h-5 ${card.iconColor}`} />
+            </div>
+            <div>
+              <p className="text-xs font-medium text-gray-500 dark:text-slate-400">{card.label}</p>
+              <p className={`text-xl font-bold ${card.valueColor || 'text-gray-900 dark:text-white'} transition-colors duration-200`}>
+                {card.value}
+              </p>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
