@@ -23,7 +23,7 @@ export function ArpuChart() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('api/arpu')
+    fetch('/api/arpu')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()

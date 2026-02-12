@@ -31,6 +31,20 @@ CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 CONFIG_FILE = CONFIG_DIR / "stripe_prices.json"
 
 
+def find_existing_price(tier_key):
+    """Check if a product with this tier key already exists in Stripe."""
+    products = stripe.Product.search(query=f"metadata['tier']:'{tier_key}'", limit=1)
+    if not products.data:
+        return None, None
+
+    product = products.data[0]
+    prices = stripe.Price.list(product=product.id, active=True, limit=1)
+    if not prices.data:
+        return product, None
+
+    return product, prices.data[0]
+
+
 def main():
     print("Creating Stripe Products and Prices...\n")
 
@@ -40,24 +54,29 @@ def main():
     }
 
     for tier in TIERS:
-        product = stripe.Product.create(
-            name=tier["name"],
-            description=tier["description"],
-            metadata={"tier": tier["key"]},
-        )
+        product, price = find_existing_price(tier["key"])
 
-        price = stripe.Price.create(
-            product=product.id,
-            unit_amount=tier["amount"],
-            currency="usd",
-            recurring={"interval": "month"},
-            metadata={"tier": tier["key"]},
-        )
+        if product and price:
+            print(f"  {tier['name']:12s}  EXISTS  product={product.id}  price={price.id}  ${tier['amount']/100:.2f}/screen/mo")
+        else:
+            if not product:
+                product = stripe.Product.create(
+                    name=tier["name"],
+                    description=tier["description"],
+                    metadata={"tier": tier["key"]},
+                )
+
+            price = stripe.Price.create(
+                product=product.id,
+                unit_amount=tier["amount"],
+                currency="usd",
+                recurring={"interval": "month"},
+                metadata={"tier": tier["key"]},
+            )
+            print(f"  {tier['name']:12s}  CREATED product={product.id}  price={price.id}  ${tier['amount']/100:.2f}/screen/mo")
 
         config["price_ids"][tier["key"]] = price.id
         config["price_to_plan"][price.id] = tier["name"]
-
-        print(f"  {tier['name']:12s}  product={product.id}  price={price.id}  ${tier['amount']/100:.2f}/screen/mo")
 
     # Save config for other scripts to read
     CONFIG_DIR.mkdir(exist_ok=True)
