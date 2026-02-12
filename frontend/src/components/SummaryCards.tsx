@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { DollarSign, TrendingUp, Users, BarChart3 } from 'lucide-react'
+import { DollarSign, TrendingUp, Users, UsersRound, BarChart3, UserMinus } from 'lucide-react'
 
 interface MrrDataPoint {
   month: string
@@ -14,6 +14,11 @@ interface ArpuDataPoint {
   arppu: number
 }
 
+interface ChurnDataPoint {
+  month: string
+  churn_rate: number
+}
+
 const formatDollar = (value: number) =>
   `$${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 
@@ -23,6 +28,7 @@ const formatDollarDecimal = (value: number) =>
 export function SummaryCards() {
   const [mrrData, setMrrData] = useState<MrrDataPoint[]>([])
   const [arpuData, setArpuData] = useState<ArpuDataPoint[]>([])
+  const [churnData, setChurnData] = useState<ChurnDataPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -36,10 +42,15 @@ export function SummaryCards() {
         if (!r.ok) throw new Error(`ARPU API failed: HTTP ${r.status}`)
         return r.json()
       }),
+      fetch('/api/churn').then((r) => {
+        if (!r.ok) throw new Error(`Churn API failed: HTTP ${r.status}`)
+        return r.json()
+      }),
     ])
-      .then(([mrrJson, arpuJson]) => {
+      .then(([mrrJson, arpuJson, churnJson]) => {
         setMrrData(mrrJson.data)
         setArpuData(arpuJson.data)
+        setChurnData(churnJson.data)
         setLoading(false)
       })
       .catch((err) => {
@@ -50,8 +61,8 @@ export function SummaryCards() {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-4 gap-4 h-full">
-        {[...Array(4)].map((_, i) => (
+      <div className="grid grid-cols-6 gap-3 h-full">
+        {[...Array(6)].map((_, i) => (
           <div key={i} className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 animate-pulse transition-colors duration-200">
             <div className="h-3 bg-gray-200 dark:bg-slate-600 rounded w-20 mb-3"></div>
             <div className="h-6 bg-gray-200 dark:bg-slate-600 rounded w-28"></div>
@@ -72,11 +83,14 @@ export function SummaryCards() {
   const latest = mrrData[mrrData.length - 1]
   const previous = mrrData.length >= 2 ? mrrData[mrrData.length - 2] : null
   const latestArpu = arpuData[arpuData.length - 1]
+  const latestChurn = churnData[churnData.length - 1]
 
   const momGrowth =
     previous && previous.mrr_amount > 0
       ? ((latest.mrr_amount - previous.mrr_amount) / previous.mrr_amount) * 100
       : null
+
+  const churnRate = latestChurn ? latestChurn.churn_rate : null
 
   const cards = [
     {
@@ -112,29 +126,52 @@ export function SummaryCards() {
       iconBg: 'bg-sky-50 dark:bg-sky-900/30',
     },
     {
+      label: 'Total Customers',
+      value: latest ? latest.total_customers.toString() : '\u2014',
+      icon: UsersRound,
+      iconColor: 'text-violet-600 dark:text-violet-400',
+      iconBg: 'bg-violet-50 dark:bg-violet-900/30',
+    },
+    {
       label: 'ARPPU',
       value: latestArpu ? formatDollarDecimal(latestArpu.arppu) : '\u2014',
       icon: BarChart3,
       iconColor: 'text-teal-600 dark:text-teal-400',
       iconBg: 'bg-teal-50 dark:bg-teal-900/30',
     },
+    {
+      label: 'Churn Rate',
+      value: churnRate !== null ? `${churnRate.toFixed(1)}%` : '\u2014',
+      icon: UserMinus,
+      iconColor: churnRate !== null && churnRate > 0
+        ? 'text-red-600 dark:text-red-400'
+        : 'text-emerald-600 dark:text-emerald-400',
+      iconBg: churnRate !== null && churnRate > 0
+        ? 'bg-red-50 dark:bg-red-900/30'
+        : 'bg-emerald-50 dark:bg-emerald-900/30',
+      valueColor: churnRate !== null && churnRate > 0
+        ? 'text-red-600 dark:text-red-400'
+        : churnRate !== null
+          ? 'text-emerald-600 dark:text-emerald-400'
+          : undefined,
+    },
   ]
 
   return (
-    <div className="grid grid-cols-4 gap-4 h-full">
+    <div className="grid grid-cols-6 gap-3 h-full">
       {cards.map((card) => {
         const Icon = card.icon
         return (
           <div
             key={card.label}
-            className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 flex items-center gap-3 transition-colors duration-200"
+            className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-3 flex items-center gap-2.5 transition-colors duration-200"
           >
-            <div className={`p-2 rounded-lg ${card.iconBg} transition-colors duration-200`}>
-              <Icon className={`w-5 h-5 ${card.iconColor}`} />
+            <div className={`p-1.5 rounded-lg ${card.iconBg} transition-colors duration-200`}>
+              <Icon className={`w-4 h-4 ${card.iconColor}`} />
             </div>
-            <div>
-              <p className="text-xs font-medium text-gray-500 dark:text-slate-400">{card.label}</p>
-              <p className={`text-xl font-bold ${card.valueColor || 'text-gray-900 dark:text-white'} transition-colors duration-200`}>
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-gray-500 dark:text-slate-400 truncate">{card.label}</p>
+              <p className={`text-lg font-bold ${card.valueColor || 'text-gray-900 dark:text-white'} transition-colors duration-200`}>
                 {card.value}
               </p>
             </div>
