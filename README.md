@@ -24,7 +24,7 @@ Stripe Test Mode → generate_data.py (test clocks + snapshots)
 2. **Generate Data** (`scripts/generate_data.py`) — Creates 100 test customers using Stripe test clocks. Simulates 6 months of billing with upgrades, downgrades, and cancellations spread across each month. Saves monthly subscription snapshots to `config/sub_snapshots.json`.
 3. **ETL Pipeline** (`etl/extract_load.py`) — Loads subscription snapshots into BigQuery, extracts raw invoices/subscriptions from Stripe for reference, and creates views for MRR, ARPPU, and plan breakdowns.
 4. **API Server** (`api/main.py`) — FastAPI backend serving dashboard data from BigQuery.
-5. **Dashboard** (`dashboard/`) — Vite + React + TypeScript + Tailwind CSS + Recharts.
+5. **Dashboard** (`frontend/`) — Vite + React + TypeScript + Tailwind CSS + Recharts.
 
 ## Pricing Tiers
 
@@ -101,7 +101,7 @@ uv run python etl/extract_load.py
 uv run uvicorn api.main:app --port 8888 --reload
 
 # Step 5: Start the dashboard (in another terminal)
-cd dashboard && npm install && npm run dev
+cd frontend && npm install && npm run dev
 ```
 
 ### 4. Open the dashboard
