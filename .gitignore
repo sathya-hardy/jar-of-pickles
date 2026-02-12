@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 node_modules/
-dashboard/dist/
+frontend/dist/
 .venv/
 *.json
 !package.json

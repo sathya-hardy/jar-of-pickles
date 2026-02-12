@@ -23,18 +23,28 @@ export function SummaryCards() {
   const [mrrData, setMrrData] = useState<MrrDataPoint[]>([])
   const [arpuData, setArpuData] = useState<ArpuDataPoint[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     Promise.all([
-      fetch('api/mrr').then(r => r.json()),
-      fetch('api/arpu').then(r => r.json()),
+      fetch('api/mrr').then((r) => {
+        if (!r.ok) throw new Error(`MRR API failed: HTTP ${r.status}`)
+        return r.json()
+      }),
+      fetch('api/arpu').then((r) => {
+        if (!r.ok) throw new Error(`ARPU API failed: HTTP ${r.status}`)
+        return r.json()
+      }),
     ])
       .then(([mrrJson, arpuJson]) => {
         setMrrData(mrrJson.data)
         setArpuData(arpuJson.data)
         setLoading(false)
       })
-      .catch(() => setLoading(false))
+      .catch((err) => {
+        setError(err.message)
+        setLoading(false)
+      })
   }, [])
 
   if (loading) {
@@ -50,13 +60,23 @@ export function SummaryCards() {
     )
   }
 
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-6">
+        <p className="text-red-600 font-medium">Failed to load dashboard data</p>
+        <p className="text-red-500 text-sm mt-1">{error}</p>
+      </div>
+    )
+  }
+
   const latest = mrrData[mrrData.length - 1]
   const previous = mrrData.length >= 2 ? mrrData[mrrData.length - 2] : null
   const latestArpu = arpuData[arpuData.length - 1]
 
-  const momGrowth = previous
-    ? ((latest.mrr_amount - previous.mrr_amount) / previous.mrr_amount) * 100
-    : 0
+  const momGrowth =
+    previous && previous.mrr_amount > 0
+      ? ((latest.mrr_amount - previous.mrr_amount) / previous.mrr_amount) * 100
+      : null
 
   const cards = [
     {
@@ -66,8 +86,10 @@ export function SummaryCards() {
     },
     {
       label: 'MoM Growth',
-      value: previous ? `${momGrowth >= 0 ? '+' : ''}${momGrowth.toFixed(1)}%` : '—',
-      color: momGrowth >= 0 ? 'text-green-600' : 'text-red-600',
+      value: momGrowth !== null
+        ? `${momGrowth >= 0 ? '+' : ''}${momGrowth.toFixed(1)}%`
+        : '—',
+      color: momGrowth !== null && momGrowth >= 0 ? 'text-green-600' : momGrowth !== null ? 'text-red-600' : 'text-gray-400',
     },
     {
       label: 'Paying Customers',

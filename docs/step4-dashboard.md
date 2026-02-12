@@ -3,7 +3,7 @@
 ## Overview
 
 - **FastAPI backend** (`api/main.py`) — Thin API layer querying BigQuery views, runs on port 8888
-- **React frontend** (`dashboard/`) — Vite + TypeScript + Tailwind CSS + Recharts, runs on port 5173
+- **React frontend** (`frontend/`) — Vite + TypeScript + Tailwind CSS + Recharts, runs on port 5173
 
 ## Prerequisites
 
@@ -19,10 +19,10 @@
 uv run uvicorn api.main:app --port 8888 --reload
 ```
 
-### Start the dashboard (separate terminal)
+### Start the frontend (separate terminal)
 
 ```bash
-cd dashboard
+cd frontend
 npm install
 npm run dev
 ```
@@ -38,7 +38,10 @@ All endpoints return JSON. Base URL: `http://localhost:8888`
 | `/api/mrr` | GET | `{data: [{month, mrr_amount, paying_customers, total_customers, active_subscriptions}]}` |
 | `/api/mrr-by-plan` | GET | `{data: [{month, plan_name, mrr_amount}]}` |
 | `/api/arpu` | GET | `{data: [{month, arppu}]}` |
-| `/api/health` | GET | `{status: "ok"}` |
+| `/api/customers-by-plan` | GET | `{data: [{month, plan_name, customer_count}]}` |
+| `/api/health` | GET | `{status: "ok", bigquery: "connected"}` or `{status: "degraded", bigquery: "error: ..."}` |
+
+The BigQuery client is lazy-initialized on first request, so the app starts even if credentials are misconfigured. The `/api/health` endpoint tests BigQuery connectivity and reports status without crashing.
 
 ### Auto-generated API docs
 
@@ -57,13 +60,15 @@ FastAPI provides interactive docs at:
 ┌──────────────────────────┬──────────────────────────────┐
 │     MRR Trend            │     Revenue by Plan          │
 │     (Line Chart)         │     (Stacked Area)           │
-│                          │                              │
 └──────────────────────────┴──────────────────────────────┘
 ┌──────────────────────────┬──────────────────────────────┐
 │     ARPPU Trend          │     Customer Count           │
 │     (Line Chart)         │     (Dual Line Chart)        │
-│                          │     Total + Paying           │
 └──────────────────────────┴──────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│              Customers by Plan                          │
+│              (Stacked Bar Chart)                        │
+└────────────────────────────────────────────────────────┘
 ```
 
 ## Components
@@ -75,6 +80,13 @@ FastAPI provides interactive docs at:
 | Plan Breakdown | `PlanBreakdown.tsx` | Recharts AreaChart (stacked) | `/api/mrr-by-plan` |
 | ARPPU Trend | `ArpuChart.tsx` | Recharts LineChart | `/api/arpu` |
 | Customer Count | `CustomerChart.tsx` | Recharts LineChart (dual) | `/api/mrr` |
+| Customers by Plan | `CustomersByPlan.tsx` | Recharts BarChart (stacked) | `/api/customers-by-plan` |
+
+## Error Handling
+
+- **API**: All BigQuery query errors return HTTP 500 with descriptive error messages
+- **SummaryCards**: Checks `res.ok` on both fetch calls; renders an error banner on failure; guards against division by zero on MoM growth calculation
+- **All chart components**: Show loading, error, and empty states
 
 ## Development
 
@@ -88,6 +100,7 @@ Using Tailwind CSS v4 with the `@tailwindcss/vite` plugin. Styles are imported v
 
 ### Adding New Charts
 
-1. Create a new component in `dashboard/src/components/`
-2. Add a new API endpoint in `api/main.py` (or reuse existing)
-3. Import and add to `App.tsx` grid layout
+1. Create a new component in `frontend/src/components/`
+2. Add a new BigQuery view in `create_views()` in `etl/extract_load.py`
+3. Add a new API endpoint in `api/main.py`
+4. Import and add to `App.tsx` grid layout

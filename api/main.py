@@ -6,7 +6,7 @@ Run: uv run uvicorn api.main:app --port 8888 --reload
 """
 
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import bigquery
 from dotenv import load_dotenv
@@ -25,13 +25,26 @@ app.add_middleware(
 PROJECT_ID = os.getenv("GCP_PROJECT_ID")
 DATASET = os.getenv("BQ_DATASET", "stripe_mrr")
 
-bq_client = bigquery.Client(project=PROJECT_ID)
+# Lazy-initialized BigQuery client
+_bq_client = None
+
+
+def get_bq_client() -> bigquery.Client:
+    """Lazy-initialize BigQuery client on first use."""
+    global _bq_client
+    if _bq_client is None:
+        _bq_client = bigquery.Client(project=PROJECT_ID)
+    return _bq_client
 
 
 def query_bq(sql: str) -> list[dict]:
     """Run a BigQuery query and return results as list of dicts."""
-    results = bq_client.query(sql).result()
-    return [dict(row) for row in results]
+    try:
+        client = get_bq_client()
+        results = client.query(sql).result()
+        return [dict(row) for row in results]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"BigQuery error: {str(e)}")
 
 
 @app.get("/api/mrr")
@@ -93,5 +106,10 @@ def get_customers_by_plan():
 
 @app.get("/api/health")
 def health():
-    """Health check."""
-    return {"status": "ok"}
+    """Health check. Tests BigQuery connectivity."""
+    try:
+        client = get_bq_client()
+        client.query("SELECT 1").result()
+        return {"status": "ok", "bigquery": "connected"}
+    except Exception as e:
+        return {"status": "degraded", "bigquery": f"error: {str(e)}"}
