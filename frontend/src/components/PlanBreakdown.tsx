@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
 import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
   Tooltip,
   ResponsiveContainer,
   Legend,
@@ -16,30 +14,35 @@ interface RawDataPoint {
   mrr_amount: number
 }
 
-interface ChartDataPoint {
-  month: string
-  Free: number
-  Standard: number
-  'Pro Plus': number
-  Engage: number
-  Enterprise: number
+interface PieDataPoint {
+  name: string
+  value: number
 }
 
-const PLAN_COLORS: Record<string, string> = {
+interface PlanBreakdownProps {
+  isDarkMode: boolean
+}
+
+const PLAN_COLORS_LIGHT: Record<string, string> = {
   'Free': '#94a3b8',
   'Standard': '#60a5fa',
-  'Pro Plus': '#a78bfa',
+  'Pro Plus': '#4f46e5',
   'Engage': '#f472b6',
-  'Enterprise': '#fb923c',
+  'Enterprise': '#0f172a',
+}
+
+const PLAN_COLORS_DARK: Record<string, string> = {
+  'Free': '#94a3b8',
+  'Standard': '#60a5fa',
+  'Pro Plus': '#818cf8',
+  'Engage': '#f472b6',
+  'Enterprise': '#e2e8f0',
 }
 
 const PLAN_ORDER = ['Free', 'Standard', 'Pro Plus', 'Engage', 'Enterprise']
 
-const formatDollar = (value: number) =>
-  `$${(value / 1000).toFixed(0)}k`
-
-export function PlanBreakdown() {
-  const [data, setData] = useState<ChartDataPoint[]>([])
+export function PlanBreakdown({ isDarkMode }: PlanBreakdownProps) {
+  const [data, setData] = useState<PieDataPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -50,25 +53,24 @@ export function PlanBreakdown() {
         return res.json()
       })
       .then((json) => {
-        // Pivot: group by month, with plan names as columns
-        const byMonth: Record<string, ChartDataPoint> = {}
-        json.data.forEach((row: RawDataPoint) => {
-          if (!byMonth[row.month]) {
-            byMonth[row.month] = {
-              month: row.month,
-              Free: 0,
-              Standard: 0,
-              'Pro Plus': 0,
-              Engage: 0,
-              Enterprise: 0,
-            }
-          }
-          const key = row.plan_name as keyof ChartDataPoint
-          if (key in byMonth[row.month]) {
-            (byMonth[row.month][key] as number) = row.mrr_amount
-          }
-        })
-        setData(Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month)))
+        // Get the latest month's data for the pie chart
+        const rows = json.data as RawDataPoint[]
+        if (rows.length === 0) {
+          setData([])
+          setLoading(false)
+          return
+        }
+        const latestMonth = rows[rows.length - 1].month
+        const latestData = rows.filter((r) => r.month === latestMonth)
+
+        const pieData: PieDataPoint[] = PLAN_ORDER
+          .map((plan) => {
+            const match = latestData.find((r) => r.plan_name === plan)
+            return { name: plan, value: match ? match.mrr_amount : 0 }
+          })
+          .filter((d) => d.value > 0)
+
+        setData(pieData)
         setLoading(false)
       })
       .catch((err) => {
@@ -77,30 +79,44 @@ export function PlanBreakdown() {
       })
   }, [])
 
-  if (loading) return <div className="h-72 flex items-center justify-center text-gray-400">Loading...</div>
-  if (error) return <div className="h-72 flex items-center justify-center text-red-500">Error: {error}</div>
-  if (data.length === 0) return <div className="h-72 flex items-center justify-center text-gray-400">No data</div>
+  const colors = isDarkMode ? PLAN_COLORS_DARK : PLAN_COLORS_LIGHT
+
+  if (loading) return <div className="h-full flex items-center justify-center text-gray-400 dark:text-slate-500">Loading...</div>
+  if (error) return <div className="h-full flex items-center justify-center text-red-500 dark:text-red-400 text-sm">Error: {error}</div>
+  if (data.length === 0) return <div className="h-full flex items-center justify-center text-gray-400 dark:text-slate-500">No data</div>
 
   return (
-    <ResponsiveContainer width="100%" height={300}>
-      <AreaChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-        <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-        <YAxis tickFormatter={formatDollar} tick={{ fontSize: 12 }} />
-        <Tooltip formatter={(value: number) => [`$${value.toLocaleString()}`, '']} />
-        <Legend />
-        {PLAN_ORDER.map((plan) => (
-          <Area
-            key={plan}
-            type="monotone"
-            dataKey={plan}
-            stackId="1"
-            stroke={PLAN_COLORS[plan]}
-            fill={PLAN_COLORS[plan]}
-            fillOpacity={0.6}
-          />
-        ))}
-      </AreaChart>
+    <ResponsiveContainer width="100%" height="100%">
+      <PieChart>
+        <Pie
+          data={data}
+          cx="50%"
+          cy="45%"
+          innerRadius="60%"
+          outerRadius="80%"
+          paddingAngle={2}
+          dataKey="value"
+        >
+          {data.map((entry) => (
+            <Cell key={entry.name} fill={colors[entry.name] || '#94a3b8'} />
+          ))}
+        </Pie>
+        <Tooltip
+          formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
+          contentStyle={{
+            borderRadius: '8px',
+            border: isDarkMode ? '1px solid #334155' : '1px solid #e5e7eb',
+            backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
+            color: isDarkMode ? '#e2e8f0' : '#1f2937',
+          }}
+        />
+        <Legend
+          verticalAlign="bottom"
+          iconType="circle"
+          iconSize={8}
+          wrapperStyle={{ fontSize: '11px', color: isDarkMode ? '#94a3b8' : '#6b7280' }}
+        />
+      </PieChart>
     </ResponsiveContainer>
   )
 }

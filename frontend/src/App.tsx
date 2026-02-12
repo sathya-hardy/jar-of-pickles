@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { LayoutDashboard, Sun, Moon } from 'lucide-react'
 import { SummaryCards } from './components/SummaryCards'
 import { MrrChart } from './components/MrrChart'
 import { PlanBreakdown } from './components/PlanBreakdown'
@@ -6,48 +8,83 @@ import { CustomerChart } from './components/CustomerChart'
 import { CustomersByPlan } from './components/CustomersByPlan'
 
 function App() {
+  const [isDarkMode, setIsDarkMode] = useState(false)
+
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          MRR Dashboard
-        </h1>
-        <p className="text-gray-500 mb-8">
-          Monthly Recurring Revenue &mdash; Digital Signage SaaS
-        </p>
-
-        {/* Summary Cards */}
-        <SummaryCards />
-
-        {/* MRR Trend + Plan Breakdown */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">MRR Trend</h2>
-            <MrrChart />
+    <div className={`${isDarkMode ? 'dark' : ''}`}>
+      <div className="h-screen w-screen overflow-hidden flex flex-col bg-gray-50 dark:bg-slate-900 transition-colors duration-200">
+        {/* Header */}
+        <header className="flex items-center justify-between px-6 py-3 border-b border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 transition-colors duration-200">
+          <div className="flex items-center gap-3">
+            <LayoutDashboard className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+            <div>
+              <h1 className="text-lg font-bold text-gray-900 dark:text-white leading-tight">
+                MRR Dashboard
+              </h1>
+              <p className="text-xs text-gray-500 dark:text-slate-400">
+                Monthly Recurring Revenue &mdash; Digital Signage SaaS
+              </p>
+            </div>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Revenue by Plan</h2>
-            <PlanBreakdown />
+          <div className="flex items-center gap-4">
+            <span className="text-xs text-gray-400 dark:text-slate-500">Last 7 months</span>
+            <button
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors duration-200"
+              aria-label="Toggle dark mode"
+            >
+              {isDarkMode ? (
+                <Sun className="w-5 h-5 text-slate-400" />
+              ) : (
+                <Moon className="w-5 h-5 text-gray-500" />
+              )}
+            </button>
           </div>
-        </div>
+        </header>
 
-        {/* ARPPU + Customer Count */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">ARPPU Trend</h2>
-            <ArpuChart />
+        {/* Body */}
+        <div className="flex-1 flex flex-col min-h-0 p-4 gap-4">
+          {/* Summary Cards — fixed height */}
+          <div className="h-28 shrink-0">
+            <SummaryCards />
           </div>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Customer Count</h2>
-            <CustomerChart />
-          </div>
-        </div>
 
-        {/* Customers by Plan */}
-        <div className="grid grid-cols-1 gap-6">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Customers by Plan</h2>
-            <CustomersByPlan />
+          {/* Top chart row: MRR Trend (2/3) + Revenue by Plan (1/3) */}
+          <div className="flex-1 flex gap-4 min-h-0">
+            <div className="flex-[2] min-w-0 bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 flex flex-col transition-colors duration-200">
+              <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-100 mb-2">MRR Trend</h2>
+              <div className="flex-1 min-h-0">
+                <MrrChart isDarkMode={isDarkMode} />
+              </div>
+            </div>
+            <div className="flex-[1] min-w-0 bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 flex flex-col transition-colors duration-200">
+              <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-100 mb-2">Revenue by Plan</h2>
+              <div className="flex-1 min-h-0">
+                <PlanBreakdown isDarkMode={isDarkMode} />
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom chart row: ARPPU (1/3) + Customers (1/3) + Customers by Plan (1/3) */}
+          <div className="flex-1 flex gap-4 min-h-0">
+            <div className="flex-1 min-w-0 bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 flex flex-col transition-colors duration-200">
+              <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-100 mb-2">ARPPU Trend</h2>
+              <div className="flex-1 min-h-0">
+                <ArpuChart isDarkMode={isDarkMode} />
+              </div>
+            </div>
+            <div className="flex-1 min-w-0 bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 flex flex-col transition-colors duration-200">
+              <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-100 mb-2">Active Customers</h2>
+              <div className="flex-1 min-h-0">
+                <CustomerChart isDarkMode={isDarkMode} />
+              </div>
+            </div>
+            <div className="flex-1 min-w-0 bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 flex flex-col transition-colors duration-200">
+              <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-100 mb-2">Customers by Plan</h2>
+              <div className="flex-1 min-h-0">
+                <CustomersByPlan isDarkMode={isDarkMode} />
+              </div>
+            </div>
           </div>
         </div>
       </div>

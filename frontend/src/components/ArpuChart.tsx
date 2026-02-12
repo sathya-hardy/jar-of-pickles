@@ -14,10 +14,11 @@ interface ArpuDataPoint {
   arppu: number
 }
 
-const formatDollar = (value: number) =>
-  `$${value.toFixed(0)}`
+interface ArpuChartProps {
+  isDarkMode: boolean
+}
 
-export function ArpuChart() {
+export function ArpuChart({ isDarkMode }: ArpuChartProps) {
   const [data, setData] = useState<ArpuDataPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -38,24 +39,43 @@ export function ArpuChart() {
       })
   }, [])
 
-  if (loading) return <div className="h-72 flex items-center justify-center text-gray-400">Loading...</div>
-  if (error) return <div className="h-72 flex items-center justify-center text-red-500">Error: {error}</div>
-  if (data.length === 0) return <div className="h-72 flex items-center justify-center text-gray-400">No data</div>
+  const strokeColor = isDarkMode ? '#2dd4bf' : '#0d9488'
+  const gridColor = isDarkMode ? '#334155' : '#e5e7eb'
+  const textColor = isDarkMode ? '#94a3b8' : '#6b7280'
+
+  if (loading) return <div className="h-full flex items-center justify-center text-gray-400 dark:text-slate-500">Loading...</div>
+  if (error) return <div className="h-full flex items-center justify-center text-red-500 dark:text-red-400 text-sm">Error: {error}</div>
+  if (data.length === 0) return <div className="h-full flex items-center justify-center text-gray-400 dark:text-slate-500">No data</div>
 
   return (
-    <ResponsiveContainer width="100%" height={300}>
+    <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-        <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-        <YAxis tickFormatter={formatDollar} tick={{ fontSize: 12 }} />
-        <Tooltip formatter={(value: number) => [`$${value.toFixed(2)}`, 'ARPPU']} />
+        <CartesianGrid horizontal={true} vertical={false} strokeDasharray="3 3" stroke={gridColor} />
+        <XAxis dataKey="month" tick={{ fontSize: 11, fill: textColor }} tickLine={false} axisLine={false} />
+        <YAxis
+          tickFormatter={(value: number) => `$${value.toFixed(0)}`}
+          tick={{ fontSize: 11, fill: textColor }}
+          tickLine={false}
+          axisLine={false}
+          domain={['dataMin - 2', 'dataMax + 2']}
+        />
+        <Tooltip
+          formatter={(value: number) => [`$${value.toFixed(2)}`, 'ARPPU']}
+          contentStyle={{
+            borderRadius: '8px',
+            border: isDarkMode ? '1px solid #334155' : '1px solid #e5e7eb',
+            backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
+            color: isDarkMode ? '#e2e8f0' : '#1f2937',
+          }}
+          labelStyle={{ color: isDarkMode ? '#94a3b8' : '#6b7280' }}
+        />
         <Line
           type="monotone"
           dataKey="arppu"
-          stroke="#8b5cf6"
+          stroke={strokeColor}
           strokeWidth={2}
-          dot={{ r: 4, fill: '#8b5cf6' }}
-          activeDot={{ r: 6 }}
+          dot={{ r: 4, fill: strokeColor, stroke: strokeColor }}
+          activeDot={{ r: 6, fill: strokeColor }}
         />
       </LineChart>
     </ResponsiveContainer>

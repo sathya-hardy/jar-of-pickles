@@ -16,7 +16,11 @@ interface MrrDataPoint {
   total_customers: number
 }
 
-export function CustomerChart() {
+interface CustomerChartProps {
+  isDarkMode: boolean
+}
+
+export function CustomerChart({ isDarkMode }: CustomerChartProps) {
   const [data, setData] = useState<MrrDataPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -37,33 +41,48 @@ export function CustomerChart() {
       })
   }, [])
 
-  if (loading) return <div className="h-72 flex items-center justify-center text-gray-400">Loading...</div>
-  if (error) return <div className="h-72 flex items-center justify-center text-red-500">Error: {error}</div>
-  if (data.length === 0) return <div className="h-72 flex items-center justify-center text-gray-400">No data</div>
+  const customerColor = isDarkMode ? '#38bdf8' : '#0284c7'
+  const totalColor = isDarkMode ? '#94a3b8' : '#94a3b8'
+  const gridColor = isDarkMode ? '#334155' : '#e5e7eb'
+  const textColor = isDarkMode ? '#94a3b8' : '#6b7280'
+
+  if (loading) return <div className="h-full flex items-center justify-center text-gray-400 dark:text-slate-500">Loading...</div>
+  if (error) return <div className="h-full flex items-center justify-center text-red-500 dark:text-red-400 text-sm">Error: {error}</div>
+  if (data.length === 0) return <div className="h-full flex items-center justify-center text-gray-400 dark:text-slate-500">No data</div>
 
   return (
-    <ResponsiveContainer width="100%" height={300}>
+    <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-        <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-        <YAxis tick={{ fontSize: 12 }} />
-        <Tooltip />
-        <Legend />
+        <CartesianGrid horizontal={true} vertical={false} strokeDasharray="3 3" stroke={gridColor} />
+        <XAxis dataKey="month" tick={{ fontSize: 11, fill: textColor }} tickLine={false} axisLine={false} />
+        <YAxis tick={{ fontSize: 11, fill: textColor }} tickLine={false} axisLine={false} />
+        <Tooltip
+          contentStyle={{
+            borderRadius: '8px',
+            border: isDarkMode ? '1px solid #334155' : '1px solid #e5e7eb',
+            backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
+            color: isDarkMode ? '#e2e8f0' : '#1f2937',
+          }}
+          labelStyle={{ color: isDarkMode ? '#94a3b8' : '#6b7280' }}
+        />
+        <Legend
+          wrapperStyle={{ fontSize: '11px', color: isDarkMode ? '#94a3b8' : '#6b7280' }}
+        />
         <Line
           type="monotone"
           dataKey="total_customers"
-          stroke="#94a3b8"
+          stroke={totalColor}
           strokeWidth={2}
           name="Total Customers"
-          dot={{ r: 3 }}
+          dot={{ r: 3, fill: totalColor }}
         />
         <Line
           type="monotone"
           dataKey="paying_customers"
-          stroke="#3b82f6"
+          stroke={customerColor}
           strokeWidth={2}
           name="Paying Customers"
-          dot={{ r: 3 }}
+          dot={{ r: 3, fill: customerColor }}
         />
       </LineChart>
     </ResponsiveContainer>
