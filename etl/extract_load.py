@@ -1,9 +1,12 @@
 """
 extract_load.py — Batch ETL pipeline: Stripe -> BigQuery.
 
-Extracts all invoices and subscriptions from Stripe API,
-loads them into BigQuery raw tables using WRITE_TRUNCATE (idempotent),
-then creates/updates the BigQuery views for MRR, MRR by plan, and ARPPU.
+Extracts subscription snapshots (from generate_data.py) and loads them
+into BigQuery. MRR views are built from these snapshots, which accurately
+reflect the state of each subscription at each month (including upgrades,
+downgrades, and cancellations at the exact time they happened).
+
+Also extracts raw invoices and subscriptions from Stripe for reference.
 
 Run: uv run python etl/extract_load.py
 """
@@ -38,6 +41,33 @@ with open(CONFIG_FILE) as f:
 
 PRICE_TO_PLAN = _config["price_to_plan"]
 
+# Load current run metadata for filtering
+RUN_FILE = Path(__file__).resolve().parent.parent / "config" / "current_run.json"
+
+if not RUN_FILE.exists():
+    print(f"ERROR: {RUN_FILE} not found.")
+    print("Run generate_data.py first:  uv run python scripts/generate_data.py")
+    exit(1)
+
+with open(RUN_FILE) as f:
+    _run = json.load(f)
+
+VALID_CUSTOMER_IDS = set(_run["customer_ids"])
+print(f"Filtering to {len(VALID_CUSTOMER_IDS)} customers from current run.")
+
+# Load subscription snapshots
+SNAPSHOTS_FILE = Path(__file__).resolve().parent.parent / "config" / "sub_snapshots.json"
+
+if not SNAPSHOTS_FILE.exists():
+    print(f"ERROR: {SNAPSHOTS_FILE} not found.")
+    print("Run generate_data.py first:  uv run python scripts/generate_data.py")
+    exit(1)
+
+with open(SNAPSHOTS_FILE) as f:
+    SUB_SNAPSHOTS = json.load(f)
+
+print(f"Loaded {len(SUB_SNAPSHOTS)} subscription snapshots.")
+
 
 def ensure_dataset():
     """Create BigQuery dataset if it doesn't exist."""
@@ -53,11 +83,7 @@ def ensure_dataset():
 
 
 def extract_invoices():
-    """Extract all invoices from Stripe, return list of dicts.
-
-    Uses Search API because test clock objects are hidden from list endpoints.
-    Line items are fetched per invoice since search doesn't support expand.
-    """
+    """Extract all invoices from Stripe (for reference)."""
     print("Extracting invoices from Stripe...")
     rows = []
     invoices = stripe.Invoice.search(
@@ -66,8 +92,10 @@ def extract_invoices():
     )
 
     for inv in invoices.auto_paging_iter():
+        if inv.customer not in VALID_CUSTOMER_IDS:
+            continue
+
         price_id = None
-        # Fetch line items separately (search doesn't support expand)
         lines = stripe.Invoice.list_lines(inv.id, limit=1)
         if lines.data:
             first_line = lines.data[0]
@@ -75,7 +103,6 @@ def extract_invoices():
             if pricing and pricing.get("price_details"):
                 price_id = pricing["price_details"].get("price")
 
-        # subscription_id is nested under parent.subscription_details
         subscription_id = None
         parent = getattr(inv, "parent", None)
         if parent and parent.get("subscription_details"):
@@ -99,10 +126,7 @@ def extract_invoices():
 
 
 def extract_subscriptions():
-    """Extract all subscriptions from Stripe, return list of dicts.
-
-    Uses Search API because test clock objects are hidden from list endpoints.
-    """
+    """Extract all subscriptions from Stripe (for reference)."""
     print("Extracting subscriptions from Stripe...")
     rows = []
     subs = stripe.Subscription.search(
@@ -111,6 +135,9 @@ def extract_subscriptions():
     )
 
     for sub in subs.auto_paging_iter():
+        if sub.customer not in VALID_CUSTOMER_IDS:
+            continue
+
         item = sub["items"]["data"][0]
         rows.append({
             "subscription_id": sub.id,
@@ -153,58 +180,31 @@ def load_to_bigquery(rows, table_name, schema):
 
 
 def create_views():
-    """Create or replace BigQuery views for MRR, MRR by plan, and ARPPU."""
+    """Create or replace BigQuery views for MRR, MRR by plan, ARPPU, and customers by plan."""
     print("Creating BigQuery views...")
 
-    # Build the CASE expression for price_id -> plan_name mapping
-    case_lines = []
-    for price_id, plan_name in PRICE_TO_PLAN.items():
-        case_lines.append(f"    WHEN '{price_id}' THEN '{plan_name}'")
-    case_expr = "\n".join(case_lines)
+    # Build the CASE expression for plan key -> plan display name
+    plan_case_lines = [
+        "    WHEN 'free' THEN 'Free'",
+        "    WHEN 'standard' THEN 'Standard'",
+        "    WHEN 'pro_plus' THEN 'Pro Plus'",
+        "    WHEN 'engage' THEN 'Engage'",
+        "    WHEN 'enterprise' THEN 'Enterprise'",
+    ]
+    plan_case_expr = "\n".join(plan_case_lines)
 
     # View 1: mrr_monthly
     mrr_sql = f"""
     CREATE OR REPLACE VIEW `{PROJECT_ID}.{DATASET}.mrr_monthly` AS
-    WITH paid_invoices AS (
-      SELECT
-        invoice_id,
-        customer_id,
-        subscription_id,
-        amount_paid,
-        DATE_TRUNC(DATE(period_start), MONTH) AS invoice_month
-      FROM
-        `{PROJECT_ID}.{DATASET}.raw_invoices`
-      WHERE
-        status = 'paid'
-        AND subscription_id IS NOT NULL
-        AND amount_paid > 0
-    ),
-    all_customer_months AS (
-      SELECT DISTINCT
-        customer_id,
-        DATE_TRUNC(DATE(period_start), MONTH) AS invoice_month
-      FROM
-        `{PROJECT_ID}.{DATASET}.raw_invoices`
-      WHERE
-        status = 'paid'
-        AND subscription_id IS NOT NULL
-    )
     SELECT
-      p.invoice_month AS month,
-      ROUND(SUM(p.amount_paid) / 100.0, 2) AS mrr_amount,
-      COUNT(DISTINCT p.customer_id) AS paying_customers,
-      (
-        SELECT COUNT(DISTINCT a.customer_id)
-        FROM all_customer_months a
-        WHERE a.invoice_month = p.invoice_month
-      ) AS total_customers,
-      COUNT(DISTINCT p.subscription_id) AS active_subscriptions
-    FROM
-      paid_invoices p
-    GROUP BY
-      p.invoice_month
-    ORDER BY
-      p.invoice_month ASC
+      month,
+      ROUND(SUM(mrr_cents) / 100.0, 2) AS mrr_amount,
+      COUNT(DISTINCT CASE WHEN mrr_cents > 0 THEN customer_id END) AS paying_customers,
+      COUNT(DISTINCT customer_id) AS total_customers,
+      COUNT(DISTINCT subscription_id) AS active_subscriptions
+    FROM `{PROJECT_ID}.{DATASET}.sub_snapshots`
+    GROUP BY month
+    ORDER BY month ASC
     """
     bq_client.query(mrr_sql).result()
     print(f"  Created view {DATASET}.mrr_monthly")
@@ -213,23 +213,15 @@ def create_views():
     mrr_by_plan_sql = f"""
     CREATE OR REPLACE VIEW `{PROJECT_ID}.{DATASET}.mrr_by_plan` AS
     SELECT
-      DATE_TRUNC(DATE(period_start), MONTH) AS month,
-      CASE price_id
-{case_expr}
+      month,
+      CASE plan
+{plan_case_expr}
         ELSE 'Unknown'
       END AS plan_name,
-      ROUND(SUM(amount_paid) / 100.0, 2) AS mrr_amount
-    FROM
-      `{PROJECT_ID}.{DATASET}.raw_invoices`
-    WHERE
-      status = 'paid'
-      AND subscription_id IS NOT NULL
-    GROUP BY
-      month,
-      plan_name
-    ORDER BY
-      month ASC,
-      plan_name ASC
+      ROUND(SUM(mrr_cents) / 100.0, 2) AS mrr_amount
+    FROM `{PROJECT_ID}.{DATASET}.sub_snapshots`
+    GROUP BY month, plan_name
+    ORDER BY month ASC, plan_name ASC
     """
     bq_client.query(mrr_by_plan_sql).result()
     print(f"  Created view {DATASET}.mrr_by_plan")
@@ -245,13 +237,28 @@ def create_views():
         WHEN paying_customers > 0 THEN ROUND(mrr_amount / paying_customers, 2)
         ELSE 0
       END AS arppu
-    FROM
-      `{PROJECT_ID}.{DATASET}.mrr_monthly`
-    ORDER BY
-      month ASC
+    FROM `{PROJECT_ID}.{DATASET}.mrr_monthly`
+    ORDER BY month ASC
     """
     bq_client.query(arppu_sql).result()
     print(f"  Created view {DATASET}.arppu_monthly")
+
+    # View 4: customers_by_plan
+    customers_by_plan_sql = f"""
+    CREATE OR REPLACE VIEW `{PROJECT_ID}.{DATASET}.customers_by_plan` AS
+    SELECT
+      month,
+      CASE plan
+{plan_case_expr}
+        ELSE 'Unknown'
+      END AS plan_name,
+      COUNT(DISTINCT customer_id) AS customer_count
+    FROM `{PROJECT_ID}.{DATASET}.sub_snapshots`
+    GROUP BY month, plan_name
+    ORDER BY month ASC, plan_name ASC
+    """
+    bq_client.query(customers_by_plan_sql).result()
+    print(f"  Created view {DATASET}.customers_by_plan")
 
 
 def main():
@@ -263,7 +270,7 @@ def main():
     ensure_dataset()
     print()
 
-    # Extract
+    # Extract from Stripe (for reference tables)
     invoice_rows = extract_invoices()
     subscription_rows = extract_subscriptions()
     print()
@@ -297,6 +304,19 @@ def main():
         bigquery.SchemaField("current_period_end", "TIMESTAMP"),
         bigquery.SchemaField("created", "TIMESTAMP"),
         bigquery.SchemaField("canceled_at", "TIMESTAMP"),
+    ])
+
+    # Load subscription snapshots
+    print("Loading subscription snapshots into BigQuery...")
+    load_to_bigquery(SUB_SNAPSHOTS, "sub_snapshots", [
+        bigquery.SchemaField("month", "STRING"),
+        bigquery.SchemaField("customer_id", "STRING"),
+        bigquery.SchemaField("subscription_id", "STRING"),
+        bigquery.SchemaField("plan", "STRING"),
+        bigquery.SchemaField("price_id", "STRING"),
+        bigquery.SchemaField("price_amount", "INTEGER"),
+        bigquery.SchemaField("screens", "INTEGER"),
+        bigquery.SchemaField("mrr_cents", "INTEGER"),
     ])
 
     print()

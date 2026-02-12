@@ -39,7 +39,7 @@ def get_mrr():
     """Monthly MRR time series."""
     data = query_bq(f"""
         SELECT
-            FORMAT_DATE('%Y-%m', month) AS month,
+            month,
             mrr_amount,
             paying_customers,
             total_customers,
@@ -55,7 +55,7 @@ def get_mrr_by_plan():
     """MRR broken down by plan tier per month."""
     data = query_bq(f"""
         SELECT
-            FORMAT_DATE('%Y-%m', month) AS month,
+            month,
             plan_name,
             mrr_amount
         FROM `{PROJECT_ID}.{DATASET}.mrr_by_plan`
@@ -69,10 +69,24 @@ def get_arpu():
     """ARPPU (Average Revenue Per Paying User) time series."""
     data = query_bq(f"""
         SELECT
-            FORMAT_DATE('%Y-%m', month) AS month,
+            month,
             arppu
         FROM `{PROJECT_ID}.{DATASET}.arppu_monthly`
         ORDER BY month ASC
+    """)
+    return {"data": data}
+
+
+@app.get("/api/customers-by-plan")
+def get_customers_by_plan():
+    """Customer count broken down by plan tier per month."""
+    data = query_bq(f"""
+        SELECT
+            month,
+            plan_name,
+            customer_count
+        FROM `{PROJECT_ID}.{DATASET}.customers_by_plan`
+        ORDER BY month ASC, plan_name ASC
     """)
     return {"data": data}
 
