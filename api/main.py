@@ -6,7 +6,7 @@ Run: uv run uvicorn api.main:app --port 8888 --reload
 """
 
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import bigquery
 from dotenv import load_dotenv
@@ -105,11 +105,12 @@ def get_customers_by_plan():
 
 
 @app.get("/api/health")
-def health():
+def health(response: Response):
     """Health check. Tests BigQuery connectivity."""
     try:
         client = get_bq_client()
         client.query("SELECT 1").result()
         return {"status": "ok", "bigquery": "connected"}
     except Exception as e:
+        response.status_code = 503
         return {"status": "degraded", "bigquery": f"error: {str(e)}"}
