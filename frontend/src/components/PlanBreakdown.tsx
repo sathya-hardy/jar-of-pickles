@@ -109,6 +109,8 @@ export function PlanBreakdown({ isDarkMode }: PlanBreakdownProps) {
             backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
             color: isDarkMode ? '#e2e8f0' : '#1f2937',
           }}
+          itemStyle={{ color: isDarkMode ? '#e2e8f0' : '#1f2937' }}
+          labelStyle={{ color: isDarkMode ? '#94a3b8' : '#6b7280' }}
         />
         <Legend
           verticalAlign="bottom"
