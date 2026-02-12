@@ -6,12 +6,14 @@ Run: uv run uvicorn api.main:app --port 8888 --reload
 """
 
 import os
+import logging
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import bigquery
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="MRR Dashboard API")
 
@@ -43,8 +45,9 @@ def query_bq(sql: str) -> list[dict]:
         client = get_bq_client()
         results = client.query(sql).result()
         return [dict(row) for row in results]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"BigQuery error: {str(e)}")
+    except Exception:
+        logger.exception("BigQuery query failed")
+        raise HTTPException(status_code=500, detail="BigQuery query failed")
 
 
 @app.get("/api/mrr")
@@ -111,6 +114,7 @@ def health(response: Response):
         client = get_bq_client()
         client.query("SELECT 1").result()
         return {"status": "ok", "bigquery": "connected"}
-    except Exception as e:
+    except Exception:
+        logger.exception("BigQuery connectivity check failed")
         response.status_code = 503
-        return {"status": "degraded", "bigquery": f"error: {str(e)}"}
+        return {"status": "degraded", "bigquery": "unavailable"}
