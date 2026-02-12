@@ -44,7 +44,7 @@ export function PlanBreakdown() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('api/mrr-by-plan')
+    fetch('/api/mrr-by-plan')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()

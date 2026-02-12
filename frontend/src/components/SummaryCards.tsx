@@ -27,11 +27,11 @@ export function SummaryCards() {
 
   useEffect(() => {
     Promise.all([
-      fetch('api/mrr').then((r) => {
+      fetch('/api/mrr').then((r) => {
         if (!r.ok) throw new Error(`MRR API failed: HTTP ${r.status}`)
         return r.json()
       }),
-      fetch('api/arpu').then((r) => {
+      fetch('/api/arpu').then((r) => {
         if (!r.ok) throw new Error(`ARPU API failed: HTTP ${r.status}`)
         return r.json()
       }),

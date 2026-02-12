@@ -41,7 +41,7 @@ export function CustomersByPlan() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('api/customers-by-plan')
+    fetch('/api/customers-by-plan')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()
