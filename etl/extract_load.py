@@ -260,6 +260,27 @@ def create_views():
     bq_client.query(customers_by_plan_sql).result()
     print(f"  Created view {DATASET}.customers_by_plan")
 
+    # View 5: churn_monthly
+    churn_sql = f"""
+    CREATE OR REPLACE VIEW `{PROJECT_ID}.{DATASET}.churn_monthly` AS
+    SELECT
+      month,
+      total_customers,
+      LAG(total_customers) OVER (ORDER BY month ASC) AS prev_customers,
+      CASE
+        WHEN LAG(total_customers) OVER (ORDER BY month ASC) > 0
+        THEN ROUND(
+          (LAG(total_customers) OVER (ORDER BY month ASC) - total_customers)
+          / LAG(total_customers) OVER (ORDER BY month ASC) * 100, 2
+        )
+        ELSE 0
+      END AS churn_rate
+    FROM `{PROJECT_ID}.{DATASET}.mrr_monthly`
+    ORDER BY month ASC
+    """
+    bq_client.query(churn_sql).result()
+    print(f"  Created view {DATASET}.churn_monthly")
+
 
 def main():
     print("=" * 60)

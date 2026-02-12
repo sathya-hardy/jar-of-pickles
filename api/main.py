@@ -107,6 +107,21 @@ def get_customers_by_plan():
     return {"data": data}
 
 
+@app.get("/api/churn")
+def get_churn():
+    """Monthly customer churn rate."""
+    data = query_bq(f"""
+        SELECT
+            month,
+            total_customers,
+            prev_customers,
+            churn_rate
+        FROM `{PROJECT_ID}.{DATASET}.churn_monthly`
+        ORDER BY month ASC
+    """)
+    return {"data": data}
+
+
 @app.get("/api/health")
 def health(response: Response):
     """Health check. Tests BigQuery connectivity."""
