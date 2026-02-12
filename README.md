@@ -5,18 +5,28 @@ A complete pipeline for generating, extracting, transforming, and visualizing Mo
 ## Architecture
 
 ```
-Stripe Test Mode → Batch ETL (Python) → BigQuery → FastAPI → React Dashboard
+Stripe Test Mode → generate_data.py (test clocks + snapshots)
+                         ↓
+                  config/sub_snapshots.json + config/current_run.json
+                         ↓
+                  extract_load.py (Stripe API + snapshots → BigQuery)
+                         ↓
+                  BigQuery Views (MRR, ARPPU, plan breakdowns)
+                         ↓
+                  FastAPI (port 8888)
+                         ↓
+                  React Dashboard (port 5173)
 ```
 
-### Pipeline Steps
+## Pipeline Steps
 
-1. **Data Generation** (`scripts/`) — Creates 100 test customers with 5 pricing tiers using Stripe test clocks to simulate 6 months of billing history
-2. **ETL Pipeline** (`etl/`) — Extracts invoices and subscriptions from Stripe API, loads into BigQuery raw tables
-3. **SQL Views** (`sql/`) — BigQuery views that calculate MRR, MRR by plan, and ARPPU
-4. **API Server** (`api/`) — FastAPI backend on port 8888 serving dashboard data from BigQuery
-5. **Dashboard** (`dashboard/`) — Vite + React + TypeScript + Tailwind CSS + Recharts
+1. **Seed Prices** (`scripts/seed_prices.py`) — Creates 5 Stripe products and prices. Run once.
+2. **Generate Data** (`scripts/generate_data.py`) — Creates 100 test customers using Stripe test clocks. Simulates 6 months of billing with upgrades, downgrades, and cancellations spread across each month. Saves monthly subscription snapshots to `config/sub_snapshots.json`.
+3. **ETL Pipeline** (`etl/extract_load.py`) — Loads subscription snapshots into BigQuery, extracts raw invoices/subscriptions from Stripe for reference, and creates views for MRR, ARPPU, and plan breakdowns.
+4. **API Server** (`api/main.py`) — FastAPI backend serving dashboard data from BigQuery.
+5. **Dashboard** (`dashboard/`) — Vite + React + TypeScript + Tailwind CSS + Recharts.
 
-### Pricing Tiers
+## Pricing Tiers
 
 | Plan | Price | Screen Range |
 |------|-------|-------------|
@@ -24,7 +34,23 @@ Stripe Test Mode → Batch ETL (Python) → BigQuery → FastAPI → React Dashb
 | Standard | $10/screen/mo | 2–8 screens |
 | Pro Plus | $15/screen/mo | 5–20 screens |
 | Engage | $30/screen/mo | 8–30 screens |
-| Enterprise | $45/screen/mo | 25–100 screens (min 25) |
+| Enterprise | $45/screen/mo | 25–100 screens |
+
+## Customer Distribution
+
+- 25 Free, 18 Standard, 32 Pro Plus, 15 Engage, 10 Enterprise (100 total)
+
+## Simulated Lifecycle (over 6 months)
+
+- **15 upgrades** — plan tier changes or screen count increases
+- **2 downgrades** — plan tier decreases
+- **8 cancellations** — weighted toward Free/Standard tiers
+
+Changes are spread across all 6 months (1 advance per month) for realistic, gradual MRR growth.
+
+## How MRR is Calculated
+
+MRR is derived from **subscription snapshots**, not Stripe invoices. Each month, `generate_data.py` captures the exact state of every active subscription (plan, screen count, price). This avoids issues with Stripe's inconsistent invoice generation on test clocks and gives perfectly accurate, stable metrics.
 
 ## Prerequisites
 
@@ -38,12 +64,12 @@ Stripe Test Mode → Batch ETL (Python) → BigQuery → FastAPI → React Dashb
 
 ### 1. Credentials
 
-You need two files that are **not** in the repo (they contain secrets):
+You need two files that are not in the repo (they contain secrets):
 
 | File | What it is | How to get it |
 |------|-----------|---------------|
-| `.env` | Environment variables (Stripe key, GCP project ID) | Copy `.env.example` → `.env` and fill in values |
-| `service-account.json` | GCP service account key | GCP Console → IAM & Admin → Service Accounts → Create Key → JSON → download and place in project root |
+| `.env` | Environment variables | Copy `.env.example` → `.env` and fill in values |
+| `service-account.json` | GCP service account key | GCP Console → IAM & Admin → Service Accounts → Create Key → JSON |
 
 ```bash
 cp .env.example .env
@@ -62,13 +88,13 @@ uv sync
 ### 3. Run the pipeline
 
 ```bash
-# Step 1a: Create Stripe products and prices
+# Step 1: Create Stripe products and prices (run once)
 uv run python scripts/seed_prices.py
 
-# Step 1b: Generate 100 test customers with 6 months of billing history
+# Step 2: Generate 100 test customers with 6 months of billing history
 uv run python scripts/generate_data.py
 
-# Step 2+3: Extract from Stripe, load to BigQuery, and create views
+# Step 3: Extract from Stripe, load snapshots to BigQuery, create views
 uv run python etl/extract_load.py
 
 # Step 4: Start the API server
@@ -80,11 +106,26 @@ cd dashboard && npm install && npm run dev
 
 ### 4. Open the dashboard
 
-Open `http://localhost:5173` to view the dashboard.
+Open [http://localhost:5173](http://localhost:5173) to view the dashboard.
 
 ## Dashboard Metrics
 
 - **MRR Trend** — Monthly recurring revenue over time
-- **MRR by Plan** — Revenue breakdown by pricing tier
-- **ARPPU** — Average Revenue Per Paying User
+- **Revenue by Plan** — MRR breakdown by pricing tier (stacked area chart)
+- **ARPPU Trend** — Average Revenue Per Paying User
 - **Customer Count** — Total and paying customers over time
+- **Customers by Plan** — Customer count per tier per month (stacked bar chart)
+
+## Key Config Files
+
+| File | Generated by | Used by |
+|------|-------------|---------|
+| `config/stripe_prices.json` | `seed_prices.py` | `generate_data.py`, `extract_load.py` |
+| `config/current_run.json` | `generate_data.py` | `extract_load.py` (filters to current run's customers) |
+| `config/sub_snapshots.json` | `generate_data.py` | `extract_load.py` (source of truth for MRR) |
+
+## Re-running
+
+- **`seed_prices.py`** — Only run once. Products/prices persist in Stripe.
+- **`generate_data.py`** — Deletes all existing test clocks before creating new ones. Safe to re-run.
+- **`extract_load.py`** — Uses `WRITE_TRUNCATE` so it's idempotent. Safe to re-run anytime.
