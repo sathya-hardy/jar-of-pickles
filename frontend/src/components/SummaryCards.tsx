@@ -170,7 +170,7 @@ export function SummaryCards() {
               <Icon className={`w-4 h-4 ${card.iconColor}`} />
             </div>
             <div className="min-w-0">
-              <p className="text-[11px] font-medium text-gray-500 dark:text-slate-400 truncate">{card.label}</p>
+              <p className="text-xs font-medium text-gray-500 dark:text-slate-400 truncate">{card.label}</p>
               <p className={`text-lg font-bold ${card.valueColor || 'text-gray-900 dark:text-white'} transition-colors duration-200`}>
                 {card.value}
               </p>
