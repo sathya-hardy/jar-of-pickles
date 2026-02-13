@@ -9,6 +9,7 @@ Checks per customer:
   - Plan tier matches
   - Screen count (quantity) matches
   - MRR calculation matches (price_amount * screens)
+  - Subscription status matches (active vs past_due)
 
 Also compares aggregate totals: total MRR, paying customer count, active subs.
 
@@ -82,9 +83,13 @@ def fetch_stripe_subscription(subscription_id):
     if sub.status in ("canceled", "incomplete_expired"):
         return {"status": sub.status, "active": False}
 
+    # Map Stripe status to our snapshot status values
+    snapshot_status = "past_due" if sub.status == "past_due" else "active"
+
     item = sub["items"]["data"][0]
     return {
         "status": sub.status,
+        "snapshot_status": snapshot_status,
         "active": True,
         "price_id": item.price.id,
         "price_amount": item.price.unit_amount,
@@ -143,6 +148,10 @@ def main():
         stripe_mrr = stripe_price * stripe_screens
         snap_mrr = snap["mrr_cents"]
 
+        # Compare status (active vs past_due)
+        stripe_status = stripe_data["snapshot_status"]
+        snap_status = snap.get("status", "active")
+
         errors = []
         if stripe_plan != snap_plan:
             errors.append(f"plan: snapshot={snap_plan}, stripe={stripe_plan}")
@@ -152,6 +161,8 @@ def main():
             errors.append(f"price: snapshot={snap_price}, stripe={stripe_price}")
         if stripe_mrr != snap_mrr:
             errors.append(f"mrr_cents: snapshot={snap_mrr}, stripe={stripe_mrr}")
+        if stripe_status != snap_status:
+            errors.append(f"status: snapshot={snap_status}, stripe={stripe_status}")
 
         if errors:
             mismatches.append(f"  {cust_id}: {'; '.join(errors)}")
@@ -162,6 +173,7 @@ def main():
     snap_total_mrr = sum(row["mrr_cents"] for row in snapshots)
     snap_paying = len([row for row in snapshots if row["mrr_cents"] > 0])
     snap_total = len(snapshots)
+    snap_past_due = len([row for row in snapshots if row.get("status") == "past_due"])
 
     # --- Results ---
     print("-" * 60)
@@ -189,6 +201,7 @@ def main():
     print("-" * 60)
     print(f"  Total MRR:        ${snap_total_mrr / 100:.2f}")
     print(f"  Paying customers: {snap_paying}")
+    print(f"  Past due:         {snap_past_due}")
     print(f"  Total customers:  {snap_total}")
 
     print()

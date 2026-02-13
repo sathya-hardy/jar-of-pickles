@@ -110,6 +110,24 @@ class SnapshotIntegrityTests(unittest.TestCase):
             f"Expected 7 months, got {len(months)}: {months}",
         )
 
+    def test_status_field_valid(self):
+        """Every row must have a status field with value 'active' or 'past_due'."""
+        valid_statuses = {"active", "past_due"}
+        bad = [
+            f"Row {i} ({row['month']}, {row['customer_id']}): status={row.get('status')}"
+            for i, row in enumerate(self.snapshots)
+            if row.get("status") not in valid_statuses
+        ]
+        self.assertEqual(bad, [], f"Rows with invalid status:\n" + "\n".join(bad))
+
+    def test_has_past_due_customers(self):
+        """At least one snapshot row should have status='past_due'."""
+        past_due_rows = [row for row in self.snapshots if row.get("status") == "past_due"]
+        self.assertGreater(
+            len(past_due_rows), 0,
+            "No past_due customers found in snapshots — expected at least 1",
+        )
+
 
 @unittest.skipIf(
     not SNAPSHOTS_FILE.exists(),
@@ -203,6 +221,22 @@ class StripeCrossValidationTests(unittest.TestCase):
             snapshot_total, stripe_total,
             f"Total MRR mismatch: snapshot=${snapshot_total/100:.2f}, stripe=${stripe_total/100:.2f}"
         )
+
+    def test_status_matches_stripe(self):
+        """Each snapshot's status should match the subscription status in Stripe."""
+        mismatches = []
+        for snap in self.snapshots:
+            sub = self.stripe.Subscription.retrieve(snap["subscription_id"])
+            if sub.status in ("canceled", "incomplete_expired"):
+                continue
+            expected_status = "past_due" if sub.status == "past_due" else "active"
+            snap_status = snap.get("status", "active")
+            if expected_status != snap_status:
+                mismatches.append(
+                    f"{snap['customer_id']}: snapshot status={snap_status}, "
+                    f"stripe status={sub.status} (expected={expected_status})"
+                )
+        self.assertEqual(mismatches, [], "Status mismatches:\n" + "\n".join(mismatches))
 
 
 if __name__ == "__main__":

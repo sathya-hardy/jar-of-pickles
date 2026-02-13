@@ -29,7 +29,7 @@ Stripe Test Mode → generate_data.py (test clocks + snapshots)
 ## Pipeline Steps
 
 1. **Seed Prices** (`scripts/seed_prices.py`) — Creates 5 Stripe products and prices. Run once.
-2. **Generate Data** (`scripts/generate_data.py`) — Creates 100 test customers using Stripe test clocks. Simulates 6 months of billing with upgrades, downgrades, and cancellations spread across each month. Saves monthly subscription snapshots to `config/sub_snapshots.json`.
+2. **Generate Data** (`scripts/generate_data.py`) — Creates 100 test customers using Stripe test clocks. Simulates 6 months of billing with upgrades, downgrades, cancellations, and past-due events (via declining payment methods) spread across each month. Saves monthly subscription snapshots to `config/sub_snapshots.json`.
 3. **ETL Pipeline** (`etl/extract_load.py`) — Loads subscription snapshots into BigQuery, extracts raw invoices/subscriptions from Stripe for reference, and creates views for MRR, ARPPU, and plan breakdowns.
 4. **API Server** (`api/main.py`) — FastAPI backend serving dashboard data from BigQuery.
 5. **Dashboard** (`frontend/`) — Vite + React + TypeScript + Tailwind CSS + Recharts.
@@ -53,6 +53,7 @@ Stripe Test Mode → generate_data.py (test clocks + snapshots)
 - **15 upgrades** — plan tier changes or screen count increases
 - **2 downgrades** — plan tier decreases
 - **8 cancellations** — weighted toward Free/Standard tiers
+- **5 past due** — payment method switched to a declining card, causing Stripe to set the subscription to `past_due` on the next billing cycle
 
 Changes are spread across all 6 months (1 advance per month) for realistic, gradual MRR growth.
 
@@ -123,6 +124,8 @@ Open [http://localhost:5173](http://localhost:5173) to view the dashboard.
 - **ARPPU Trend** — Average Revenue Per Paying User
 - **Customer Count** — Total and paying customers over time
 - **Customers by Plan** — Customer count per tier per month (stacked bar chart)
+- **Past Due** — Number of customers with failed payments (subscription still active but at risk)
+- **At Risk MRR** — Revenue from past-due customers that may churn
 
 ## Key Config Files
 
@@ -164,6 +167,8 @@ uv run python scripts/validate_mrr.py
 | `test_price_amount_matches_plan` | Price amounts match the known price for each plan tier |
 | `test_screens_positive` | No row has 0 or negative screens |
 | `test_all_months_present` | Exactly 7 months exist (month 0 + 6 advances) |
+| `test_status_field_valid` | Every row has status "active" or "past_due" |
+| `test_has_past_due_customers` | At least one snapshot row has status "past_due" |
 
 **`StripeCrossValidationTests`** — Compares the latest month's snapshots against Stripe's live subscription API. Requires `STRIPE_SECRET_KEY` in `.env`.
 
@@ -173,6 +178,7 @@ uv run python scripts/validate_mrr.py
 | `test_quantity_matches_stripe` | Snapshot screen count matches Stripe's subscription quantity |
 | `test_mrr_matches_stripe` | Snapshot `mrr_cents` matches `unit_amount * quantity` from Stripe |
 | `test_total_mrr_matches_stripe` | Aggregate MRR across all snapshots matches the sum from Stripe |
+| `test_status_matches_stripe` | Snapshot status (active/past_due) matches Stripe's subscription status |
 
 ### When to run
 
