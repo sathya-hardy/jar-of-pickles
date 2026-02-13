@@ -10,7 +10,7 @@ Simulates 6 months of billing history for a digital signage SaaS with:
 Test clock strategy:
 - 34 test clocks (3 customers per clock, Stripe max)
 - Each clock starts 6 months ago
-- 6 sequential advances of 1 month each (one clock at a time to avoid
+- 6 staggered advances of 1 month each (0.5s gaps between calls to avoid
   Stripe backend contention), with lifecycle events between advances
 
 Past_due timing:

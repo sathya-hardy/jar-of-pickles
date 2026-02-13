@@ -17,9 +17,9 @@ Stripe Test Mode → generate_data.py (test clocks + snapshots)
                          ↓
                   config/sub_snapshots.json + config/current_run.json
                          ↓
-                  extract_load.py (Stripe API + snapshots → BigQuery)
+                  extract_load.py (snapshots → BigQuery)
                          ↓
-                  BigQuery Views (MRR, ARPPU, plan breakdowns)
+                  BigQuery Views (MRR, ARPPU, churn, plan breakdowns)
                          ↓
                   FastAPI (port 8888)
                          ↓
@@ -66,7 +66,7 @@ Changes are spread across all 6 months (1 advance per month) for realistic, grad
 |-------|-----------|----------|
 | Cleanup | Delete existing test clocks | Parallel deletion via thread pool |
 | Phase 1 | Create clocks + customers | All 34 batches run concurrently (each batch: 1 clock + 3 customers, sequential within batch) |
-| Phases 2–7 | Advance clocks | Sequential — one clock at a time, wait for ready before next. Avoids Stripe backend contention (parallel advances create resource competition and are slower). |
+| Phases 2–7 | Advance clocks | Staggered — advance calls sent one at a time with 0.5s gaps, then batch-wait for all to finish. Avoids Stripe backend contention from simultaneous requests. |
 | Phases 2–7 | Lifecycle events | Upgrades, downgrades, cancellations run in parallel |
 | Phases 2–7 | Take snapshots | Instant — uses local tracking flags (no API calls) |
 
@@ -135,7 +135,7 @@ uv run python scripts/generate_data.py
 # Step 2b (optional): Verify snapshots match Stripe's live data
 uv run python scripts/validate_mrr.py
 
-# Step 3: Extract from Stripe, load snapshots to BigQuery, create views
+# Step 3: Load snapshots to BigQuery, create views
 uv run python etl/extract_load.py
 
 # Step 4: Start the API server

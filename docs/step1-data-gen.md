@@ -47,7 +47,7 @@ This creates 100 customers, simulates 6 months of billing, and saves:
 
 - **34 test clocks** (3 customers per clock, Stripe max)
 - Each clock starts with `frozen_time` = 6 months ago
-- **6 advances** of 1 month each, done sequentially (one clock at a time)
+- **6 advances** of 1 month each, staggered (0.5s gaps between calls, then batch-wait)
 - After each advance round, lifecycle events are applied and a snapshot is taken
 - Cleanup step at start deletes all existing test clocks (safe to re-run)
 
@@ -106,7 +106,7 @@ The script uses a mix of parallel and sequential strategies to balance speed wit
 |-------|-----------|----------|
 | Cleanup | Delete existing test clocks | Parallel deletion via thread pool |
 | Phase 1 | Create clocks + customers | All 34 batches run concurrently. Each batch (1 clock + 3 customers) runs sequentially within a single thread, but all 34 batches execute in parallel across threads. |
-| Phases 2–7 | Advance clocks | Sequential — one clock at a time, wait for ready before next. Avoids Stripe backend contention (parallel advances create resource competition and are slower). |
+| Phases 2–7 | Advance clocks | Staggered — advance calls sent one at a time with 0.5s gaps, then batch-wait for all to finish. Avoids Stripe backend contention from simultaneous requests. |
 | Phases 2–7 | Lifecycle events | Upgrades, downgrades, cancellations run in parallel |
 | Phases 2–7 | Take snapshots | Instant — uses local tracking flags (no API calls) |
 
@@ -114,10 +114,10 @@ Customer indices are pre-assigned per batch before thread dispatch so threads do
 
 Stripe limits test clocks to 3 customers each, requiring 34 clocks for 100 customers.
 
-### Why sequential clock advances?
+### Why staggered clock advances?
 
-Stripe's test clock infrastructure has limited concurrency. Advancing 34 clocks in parallel causes backend contention — each clock competes for the same resources, making every clock take minutes. Sequential advances give each clock Stripe's full attention, finishing in seconds each. Total wall-clock time is comparable or faster.
+Stripe's test clock infrastructure has limited concurrency. Advancing 34 clocks simultaneously causes backend contention — each clock competes for the same resources, making every clock take minutes. Staggering the advance calls (0.5s gaps) spreads the load so Stripe's backend isn't overwhelmed, while still letting clocks process concurrently.
 
 ## API Calls
 
-Rate-limited at 10 requests/second (0.1s sleep between sequential calls within a thread). The thread pool (15 workers) is used for clock/customer creation, cleanup, and lifecycle events. Clock advances are sequential to avoid Stripe contention.
+Rate-limited at 10 requests/second (0.1s sleep between sequential calls within a thread). The thread pool (15 workers) is used for clock/customer creation, cleanup, and lifecycle events. Clock advances are staggered to avoid Stripe contention.
