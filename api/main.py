@@ -6,6 +6,7 @@ Run: uv run uvicorn api.main:app --port 8888 --reload
 """
 
 import os
+import sys
 import logging
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,19 +14,28 @@ from google.cloud import bigquery
 from dotenv import load_dotenv
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Validate required environment variables
+PROJECT_ID = os.getenv("GCP_PROJECT_ID")
+if not PROJECT_ID:
+    logger.error("GCP_PROJECT_ID environment variable is not set")
+    sys.exit(1)
+
+DATASET = os.getenv("BQ_DATASET", "stripe_mrr")
+
+# Allow configurable CORS origins
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
 
 app = FastAPI(title="MRR Dashboard API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["GET"],
     allow_headers=["*"],
 )
-
-PROJECT_ID = os.getenv("GCP_PROJECT_ID")
-DATASET = os.getenv("BQ_DATASET", "stripe_mrr")
 
 # Lazy-initialized BigQuery client
 _bq_client = None
@@ -35,16 +45,42 @@ def get_bq_client() -> bigquery.Client:
     """Lazy-initialize BigQuery client on first use."""
     global _bq_client
     if _bq_client is None:
-        _bq_client = bigquery.Client(project=PROJECT_ID)
+        try:
+            _bq_client = bigquery.Client(project=PROJECT_ID)
+            logger.info(f"BigQuery client initialized for project {PROJECT_ID}")
+        except Exception as e:
+            logger.error(f"Failed to initialize BigQuery client: {e}")
+            raise
     return _bq_client
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Validate BigQuery connection on startup."""
+    logger.info("Starting MRR Dashboard API...")
+    logger.info(f"Project ID: {PROJECT_ID}")
+    logger.info(f"Dataset: {DATASET}")
+    logger.info(f"CORS Origins: {CORS_ORIGINS}")
+
+    try:
+        client = get_bq_client()
+        # Test connection with simple query
+        client.query("SELECT 1").result(timeout=10)
+        logger.info("✓ BigQuery connection validated")
+    except Exception as e:
+        logger.warning(f"⚠ BigQuery connection test failed: {e}")
+        logger.warning("API will start but queries may fail")
 
 
 def query_bq(sql: str) -> list[dict]:
     """Run a BigQuery query and return results as list of dicts."""
     try:
         client = get_bq_client()
-        results = client.query(sql).result()
+        results = client.query(sql).result(timeout=30)  # 30 second timeout
         return [dict(row) for row in results]
+    except TimeoutError:
+        logger.error("BigQuery query timed out after 30 seconds")
+        raise HTTPException(status_code=504, detail="Query timed out")
     except Exception:
         logger.exception("BigQuery query failed")
         raise HTTPException(status_code=500, detail="BigQuery query failed")

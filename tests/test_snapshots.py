@@ -162,61 +162,95 @@ class StripeCrossValidationTests(unittest.TestCase):
     def test_plan_matches_stripe(self):
         """Each snapshot's plan should match the subscription's current price in Stripe."""
         mismatches = []
+        errors = []
         for snap in self.snapshots:
-            sub = self.stripe.Subscription.retrieve(snap["subscription_id"])
-            if sub.status in ("canceled", "incomplete_expired"):
-                mismatches.append(
-                    f"{snap['customer_id']}: snapshot says active, Stripe says {sub.status}"
-                )
-                continue
-            stripe_price_id = sub["items"]["data"][0].price.id
-            stripe_plan = self.price_id_to_plan.get(stripe_price_id, "unknown")
-            if stripe_plan != snap["plan"]:
-                mismatches.append(
-                    f"{snap['customer_id']}: snapshot plan={snap['plan']}, stripe plan={stripe_plan}"
-                )
-        self.assertEqual(mismatches, [], "Plan mismatches:\n" + "\n".join(mismatches))
+            try:
+                sub = self.stripe.Subscription.retrieve(snap["subscription_id"])
+                if sub.status in ("canceled", "incomplete_expired"):
+                    mismatches.append(
+                        f"{snap['customer_id']}: snapshot says active, Stripe says {sub.status}"
+                    )
+                    continue
+                stripe_price_id = sub["items"]["data"][0].price.id
+                stripe_plan = self.price_id_to_plan.get(stripe_price_id, "unknown")
+                if stripe_plan != snap["plan"]:
+                    mismatches.append(
+                        f"{snap['customer_id']}: snapshot plan={snap['plan']}, stripe plan={stripe_plan}"
+                    )
+            except self.stripe.error.StripeError as e:
+                errors.append(f"{snap['customer_id']}: Stripe API error: {e}")
+            except Exception as e:
+                errors.append(f"{snap['customer_id']}: Unexpected error: {e}")
+
+        all_errors = mismatches + errors
+        self.assertEqual(all_errors, [], "Plan mismatches and errors:\n" + "\n".join(all_errors))
 
     def test_quantity_matches_stripe(self):
         """Each snapshot's screen count should match the subscription quantity in Stripe."""
         mismatches = []
+        errors = []
         for snap in self.snapshots:
-            sub = self.stripe.Subscription.retrieve(snap["subscription_id"])
-            if sub.status in ("canceled", "incomplete_expired"):
-                continue
-            stripe_qty = sub["items"]["data"][0].quantity
-            if stripe_qty != snap["screens"]:
-                mismatches.append(
-                    f"{snap['customer_id']}: snapshot screens={snap['screens']}, stripe qty={stripe_qty}"
-                )
-        self.assertEqual(mismatches, [], "Quantity mismatches:\n" + "\n".join(mismatches))
+            try:
+                sub = self.stripe.Subscription.retrieve(snap["subscription_id"])
+                if sub.status in ("canceled", "incomplete_expired"):
+                    continue
+                stripe_qty = sub["items"]["data"][0].quantity
+                if stripe_qty != snap["screens"]:
+                    mismatches.append(
+                        f"{snap['customer_id']}: snapshot screens={snap['screens']}, stripe qty={stripe_qty}"
+                    )
+            except self.stripe.error.StripeError as e:
+                errors.append(f"{snap['customer_id']}: Stripe API error: {e}")
+            except Exception as e:
+                errors.append(f"{snap['customer_id']}: Unexpected error: {e}")
+
+        all_errors = mismatches + errors
+        self.assertEqual(all_errors, [], "Quantity mismatches and errors:\n" + "\n".join(all_errors))
 
     def test_mrr_matches_stripe(self):
         """Each snapshot's mrr_cents should match price * quantity from Stripe."""
         mismatches = []
+        errors = []
         for snap in self.snapshots:
-            sub = self.stripe.Subscription.retrieve(snap["subscription_id"])
-            if sub.status in ("canceled", "incomplete_expired"):
-                continue
-            item = sub["items"]["data"][0]
-            stripe_mrr = item.price.unit_amount * item.quantity
-            if stripe_mrr != snap["mrr_cents"]:
-                mismatches.append(
-                    f"{snap['customer_id']}: snapshot mrr={snap['mrr_cents']}, "
-                    f"stripe mrr={stripe_mrr} ({item.price.unit_amount} x {item.quantity})"
-                )
-        self.assertEqual(mismatches, [], "MRR mismatches:\n" + "\n".join(mismatches))
+            try:
+                sub = self.stripe.Subscription.retrieve(snap["subscription_id"])
+                if sub.status in ("canceled", "incomplete_expired"):
+                    continue
+                item = sub["items"]["data"][0]
+                stripe_mrr = item.price.unit_amount * item.quantity
+                if stripe_mrr != snap["mrr_cents"]:
+                    mismatches.append(
+                        f"{snap['customer_id']}: snapshot mrr={snap['mrr_cents']}, "
+                        f"stripe mrr={stripe_mrr} ({item.price.unit_amount} x {item.quantity})"
+                    )
+            except self.stripe.error.StripeError as e:
+                errors.append(f"{snap['customer_id']}: Stripe API error: {e}")
+            except Exception as e:
+                errors.append(f"{snap['customer_id']}: Unexpected error: {e}")
+
+        all_errors = mismatches + errors
+        self.assertEqual(all_errors, [], "MRR mismatches and errors:\n" + "\n".join(all_errors))
 
     def test_total_mrr_matches_stripe(self):
         """Aggregate MRR from snapshots should match sum of all Stripe subscriptions."""
         snapshot_total = sum(row["mrr_cents"] for row in self.snapshots)
         stripe_total = 0
+        errors = []
         for snap in self.snapshots:
-            sub = self.stripe.Subscription.retrieve(snap["subscription_id"])
-            if sub.status in ("canceled", "incomplete_expired"):
-                continue
-            item = sub["items"]["data"][0]
-            stripe_total += item.price.unit_amount * item.quantity
+            try:
+                sub = self.stripe.Subscription.retrieve(snap["subscription_id"])
+                if sub.status in ("canceled", "incomplete_expired"):
+                    continue
+                item = sub["items"]["data"][0]
+                stripe_total += item.price.unit_amount * item.quantity
+            except self.stripe.error.StripeError as e:
+                errors.append(f"{snap['customer_id']}: Stripe API error: {e}")
+            except Exception as e:
+                errors.append(f"{snap['customer_id']}: Unexpected error: {e}")
+
+        if errors:
+            self.fail("Errors while fetching Stripe data:\n" + "\n".join(errors))
+
         self.assertEqual(
             snapshot_total, stripe_total,
             f"Total MRR mismatch: snapshot=${snapshot_total/100:.2f}, stripe=${stripe_total/100:.2f}"
@@ -225,18 +259,26 @@ class StripeCrossValidationTests(unittest.TestCase):
     def test_status_matches_stripe(self):
         """Each snapshot's status should match the subscription status in Stripe."""
         mismatches = []
+        errors = []
         for snap in self.snapshots:
-            sub = self.stripe.Subscription.retrieve(snap["subscription_id"])
-            if sub.status in ("canceled", "incomplete_expired"):
-                continue
-            expected_status = "past_due" if sub.status == "past_due" else "active"
-            snap_status = snap.get("status", "active")
-            if expected_status != snap_status:
-                mismatches.append(
-                    f"{snap['customer_id']}: snapshot status={snap_status}, "
-                    f"stripe status={sub.status} (expected={expected_status})"
-                )
-        self.assertEqual(mismatches, [], "Status mismatches:\n" + "\n".join(mismatches))
+            try:
+                sub = self.stripe.Subscription.retrieve(snap["subscription_id"])
+                if sub.status in ("canceled", "incomplete_expired"):
+                    continue
+                expected_status = "past_due" if sub.status == "past_due" else "active"
+                snap_status = snap.get("status", "active")
+                if expected_status != snap_status:
+                    mismatches.append(
+                        f"{snap['customer_id']}: snapshot status={snap_status}, "
+                        f"stripe status={sub.status} (expected={expected_status})"
+                    )
+            except self.stripe.error.StripeError as e:
+                errors.append(f"{snap['customer_id']}: Stripe API error: {e}")
+            except Exception as e:
+                errors.append(f"{snap['customer_id']}: Unexpected error: {e}")
+
+        all_errors = mismatches + errors
+        self.assertEqual(all_errors, [], "Status mismatches and errors:\n" + "\n".join(all_errors))
 
 
 if __name__ == "__main__":

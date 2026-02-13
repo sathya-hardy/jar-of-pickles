@@ -2,12 +2,13 @@
 
 ## Overview
 
-Four views transform the `sub_snapshots` table into dashboard-ready metrics:
+Five views transform the `sub_snapshots` table into dashboard-ready metrics:
 
 1. **`mrr_monthly`** — Monthly MRR with customer and subscription counts
 2. **`mrr_by_plan`** — MRR broken down by pricing tier
 3. **`arppu_monthly`** — Average Revenue Per Paying User
 4. **`customers_by_plan`** — Customer count per plan tier per month
+5. **`churn_monthly`** — Monthly customer churn rate
 
 ## Prerequisites
 
@@ -38,6 +39,8 @@ Monthly MRR aggregation from subscription snapshots.
 | paying_customers | INTEGER | Distinct customers with `mrr_cents > 0` |
 | total_customers | INTEGER | All active customers including Free tier |
 | active_subscriptions | INTEGER | Distinct active subscriptions |
+| past_due_customers | INTEGER | Distinct customers with `status = 'past_due'` |
+| at_risk_mrr | FLOAT | MRR from past_due customers in dollars |
 
 ### `mrr_by_plan`
 
@@ -72,6 +75,20 @@ Customer count per plan tier per month.
 | month | STRING | Month label |
 | plan_name | STRING | Free, Standard, Pro Plus, Engage, Enterprise |
 | customer_count | INTEGER | Number of customers on this plan |
+
+### `churn_monthly`
+
+Monthly customer churn rate. Derived from `mrr_monthly`.
+
+- **Formula**: `(prev_customers - total_customers) / prev_customers * 100`
+- First month returns 0 (no previous month to compare)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| month | STRING | Month label |
+| total_customers | INTEGER | Total customers this month |
+| prev_customers | INTEGER | Total customers previous month (via LAG) |
+| churn_rate | FLOAT | Churn rate as percentage |
 
 ## Verification
 

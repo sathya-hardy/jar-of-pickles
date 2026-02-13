@@ -107,6 +107,7 @@ export function CustomersByPlan({ isDarkMode }: CustomersByPlanProps) {
             color: isDarkMode ? '#e2e8f0' : '#1f2937',
           }}
           labelStyle={{ color: isDarkMode ? '#94a3b8' : '#6b7280' }}
+          cursor={{ fill: isDarkMode ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)' }}
         />
         <Legend
           wrapperStyle={{ fontSize: '11px', color: isDarkMode ? '#94a3b8' : '#6b7280' }}

@@ -29,44 +29,6 @@
 -- status         STRING    -- "active" or "past_due"
 
 
--- -----------------------------------------------------------------------------
--- raw_invoices (REFERENCE)
---
--- All paid/open/void invoices from Stripe. Filtered to current run only.
--- Not used for MRR calculations — kept for debugging and auditing.
--- -----------------------------------------------------------------------------
--- invoice_id     STRING
--- customer_id    STRING
--- subscription_id STRING
--- status         STRING    -- "paid", "open", "void", "uncollectible"
--- amount_paid    INTEGER   -- cents
--- currency       STRING    -- "usd"
--- price_id       STRING
--- period_start   TIMESTAMP
--- period_end     TIMESTAMP
--- created        TIMESTAMP
-
-
--- -----------------------------------------------------------------------------
--- raw_subscriptions (REFERENCE)
---
--- All subscriptions from Stripe (active + canceled). Filtered to current run.
--- Reflects the CURRENT state of each subscription, not historical.
--- Not used for MRR calculations — kept for debugging and auditing.
--- -----------------------------------------------------------------------------
--- subscription_id        STRING
--- customer_id            STRING
--- status                 STRING    -- "active", "canceled", "past_due", "incomplete"
--- price_id               STRING
--- price_amount           INTEGER   -- cents per screen
--- price_interval         STRING    -- "month"
--- quantity               INTEGER   -- number of screens
--- current_period_start   TIMESTAMP
--- current_period_end     TIMESTAMP
--- created                TIMESTAMP
--- canceled_at            TIMESTAMP -- NULL if still active
-
-
 -- =============================================================================
 -- VIEWS
 -- =============================================================================
@@ -116,3 +78,16 @@
 -- month           STRING  -- "2025-08"
 -- plan_name       STRING  -- "Free", "Standard", "Pro Plus", "Engage", "Enterprise"
 -- customer_count  INTEGER
+
+
+-- -----------------------------------------------------------------------------
+-- churn_monthly
+--
+-- Monthly customer churn rate. Derived from mrr_monthly.
+-- Formula: (prev_customers - total_customers) / prev_customers * 100
+-- First month returns 0 (no previous month to compare).
+-- -----------------------------------------------------------------------------
+-- month            STRING   -- "2025-08"
+-- total_customers  INTEGER  -- total customers this month
+-- prev_customers   INTEGER  -- total customers previous month (via LAG)
+-- churn_rate       FLOAT    -- churn rate as percentage

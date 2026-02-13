@@ -35,11 +35,12 @@ All endpoints return JSON. Base URL: `http://localhost:8888`
 
 | Endpoint | Method | Response |
 |----------|--------|----------|
-| `/api/mrr` | GET | `{data: [{month, mrr_amount, paying_customers, total_customers, active_subscriptions}]}` |
+| `/api/mrr` | GET | `{data: [{month, mrr_amount, paying_customers, total_customers, active_subscriptions, past_due_customers, at_risk_mrr}]}` |
 | `/api/mrr-by-plan` | GET | `{data: [{month, plan_name, mrr_amount}]}` |
 | `/api/arpu` | GET | `{data: [{month, arppu}]}` |
 | `/api/customers-by-plan` | GET | `{data: [{month, plan_name, customer_count}]}` |
-| `/api/health` | GET | `{status: "ok", bigquery: "connected"}` or `{status: "degraded", bigquery: "error: ..."}` |
+| `/api/churn` | GET | `{data: [{month, total_customers, prev_customers, churn_rate}]}` |
+| `/api/health` | GET | `{status: "ok", bigquery: "connected"}` or `{status: "degraded", bigquery: "unavailable"}` |
 
 The BigQuery client is lazy-initialized on first request, so the app starts even if credentials are misconfigured. The `/api/health` endpoint tests BigQuery connectivity and reports status without crashing.
 

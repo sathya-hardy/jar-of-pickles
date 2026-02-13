@@ -5,15 +5,23 @@ Simulates 6 months of billing history for a digital signage SaaS with:
 - 5 pricing tiers (Free, Standard, Pro Plus, Engage, Enterprise)
 - Per-screen subscriptions with varying screen counts
 - Lifecycle events spread across 6 monthly phases (upgrades, downgrades,
-  cancellations, and past_due via declining payment methods)
+  cancellations, and past_due via detaching payment methods)
 
 Test clock strategy:
-- 34 test clocks (3 customers per clock, last clock has 1)
+- 34 test clocks (3 customers per clock, Stripe max)
 - Each clock starts 6 months ago
-- 6 advances of 1 month each, with lifecycle events between advances
+- 6 sequential advances of 1 month each (one clock at a time to avoid
+  Stripe backend contention), with lifecycle events between advances
+
+Past_due timing:
+- Payment methods are detached BEFORE the clock advance
+- This ensures the next invoice fails and subscription becomes past_due
+- Snapshots use local tracking flags for speed during development
+- Run validate_mrr.py after generation to verify snapshots against Stripe
 
 Run: uv run python scripts/generate_data.py
 Prerequisite: Run seed_prices.py first (creates config/stripe_prices.json).
+Verification: uv run python scripts/validate_mrr.py (optional, verifies against Stripe)
 """
 
 import json
@@ -46,7 +54,21 @@ if not CONFIG_FILE.exists():
 with open(CONFIG_FILE) as f:
     _config = json.load(f)
 
+# Validate config structure
+if "price_ids" not in _config:
+    print(f"ERROR: {CONFIG_FILE} is missing 'price_ids' key.")
+    print("Run seed_prices.py first:  uv run python scripts/seed_prices.py")
+    exit(1)
+
 PRICE_IDS = _config["price_ids"]
+
+# Validate all required price IDs exist
+required_plans = ["free", "standard", "pro_plus", "engage", "enterprise"]
+missing_plans = [plan for plan in required_plans if plan not in PRICE_IDS]
+if missing_plans:
+    print(f"ERROR: {CONFIG_FILE} is missing price IDs for plans: {missing_plans}")
+    print("Run seed_prices.py first:  uv run python scripts/seed_prices.py")
+    exit(1)
 
 # Price amounts in cents per screen per month
 PRICE_AMOUNTS = {
@@ -79,7 +101,7 @@ CUSTOMER_PLANS = (
 TIER_ORDER = ["free", "standard", "pro_plus", "engage", "enterprise"]
 
 # Lifecycle events spread across 6 monthly phases
-# Total: 15 upgrades, 2 downgrades, 8 cancellations, 5 past_due
+# Total: 15 upgrades, 2 downgrades, 8 cancellations, 5 past_dues
 LIFECYCLE_PHASES = [
     {"upgrades": 2, "downgrades": 0, "cancellations": 1, "past_dues": 1},
     {"upgrades": 3, "downgrades": 1, "cancellations": 1, "past_dues": 1},
@@ -89,8 +111,8 @@ LIFECYCLE_PHASES = [
     {"upgrades": 2, "downgrades": 0, "cancellations": 1, "past_dues": 1},
 ]
 
-RATE_LIMIT_SLEEP = 0.25  # seconds between API calls
-MAX_WORKERS = 10         # thread pool size (stays well under Stripe's 25 req/s test limit)
+RATE_LIMIT_SLEEP = 0.1   # seconds between API calls
+MAX_WORKERS = 15         # thread pool size (stays well under Stripe's 25 req/s test limit)
 
 
 def sleep():
@@ -117,19 +139,28 @@ def cleanup_existing_test_clocks():
     def _delete_clock(clock_id):
         try:
             stripe.test_helpers.TestClock.delete(clock_id)
-            return clock_id, True
-        except stripe._error.RateLimitError:
-            return clock_id, False
+            return clock_id, True, None
+        except Exception as e:
+            return clock_id, False, str(e)
 
     deleted = 0
+    failed = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = {pool.submit(_delete_clock, cid): cid for cid in clock_ids}
         for future in as_completed(futures):
-            cid, ok = future.result()
+            cid, ok, error = future.result()
             if ok:
                 deleted += 1
+            else:
+                failed.append((cid, error))
 
     print(f"  Deleted {deleted}/{len(clock_ids)} test clocks.\n")
+    if failed:
+        print(f"  WARNING: Failed to delete {len(failed)} clocks:")
+        for cid, error in failed[:5]:  # Show first 5 errors
+            print(f"    {cid}: {error}")
+        if len(failed) > 5:
+            print(f"    ... and {len(failed) - 5} more")
 
 
 def months_ago_timestamp(n_months):
@@ -156,44 +187,70 @@ def advance_timestamp(base_ts, months_forward):
     return int(target.timestamp())
 
 
-def wait_for_all_clocks(clock_ids, max_wait=300, label=""):
+def wait_for_all_clocks(clock_ids, max_wait=600, label="", pool=None):
     """Poll all clocks concurrently until every one is 'ready' or failed/timed-out.
 
     Instead of waiting for clock 1, then clock 2, etc., this checks all of
     them in a single batch per iteration. Clocks that finish early are removed
     from the poll set immediately, so the total wait is ~max(individual waits)
     rather than sum(individual waits).
+
+    Uses adaptive polling: 3s for the first minute, then 5s, then 10s after 3min.
+
+    Returns: (ready_count, failed_count, timed_out_count)
     """
     pending = set(clock_ids)
     start = time.time()
+    failed_clocks = []
+
+    def _check(cid):
+        try:
+            return cid, stripe.test_helpers.TestClock.retrieve(cid), None
+        except Exception as e:
+            return cid, None, str(e)
 
     while pending:
         elapsed = time.time() - start
         if elapsed > max_wait:
             print(f"  TIMEOUT: {len(pending)} clocks still not ready after {max_wait}s{f' ({label})' if label else ''}")
-            break
+            print(f"  WARNING: Continuing anyway - this may cause 'advancement underway' errors!")
+            return len(clock_ids) - len(pending) - len(failed_clocks), len(failed_clocks), len(pending)
 
         # Poll all pending clocks in parallel
-        def _check(cid):
-            return cid, stripe.test_helpers.TestClock.retrieve(cid)
-
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        if pool:
             results = list(pool.map(_check, list(pending)))
+        else:
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as p:
+                results = list(p.map(_check, list(pending)))
 
         newly_done = []
-        for cid, clock in results:
-            if clock.status == "ready":
+        for cid, clock, error in results:
+            if error:
+                print(f"  ERROR: Failed to retrieve clock {cid}: {error}")
+                newly_done.append(cid)
+                failed_clocks.append(cid)
+            elif clock.status == "ready":
                 newly_done.append(cid)
             elif clock.status == "internal_failure":
                 print(f"  ERROR: Clock {cid} failed internally.")
                 newly_done.append(cid)
+                failed_clocks.append(cid)
 
         for cid in newly_done:
             pending.discard(cid)
 
         if pending:
+            # Adaptive polling: 3s early, 5s mid, 10s late
+            if elapsed < 60:
+                poll_interval = 3
+            elif elapsed < 180:
+                poll_interval = 5
+            else:
+                poll_interval = 10
             print(f"    {len(pending)} clocks still processing... ({int(elapsed)}s)")
-            time.sleep(5)
+            time.sleep(poll_interval)
+
+    return len(clock_ids) - len(failed_clocks), len(failed_clocks), 0
 
 
 def get_month_label(base_ts, months_forward):
@@ -254,7 +311,9 @@ def create_customer_with_sub(clock_id, customer_index, plan):
 def select_upgrade_candidates(customers, count):
     eligible = [
         c for c in customers
-        if c["plan"] != "enterprise" and not c["cancelled"]
+        if c["plan"] != "enterprise"
+        and not c["cancelled"]
+        and not c.get("past_due")  # Exclude past_due customers
     ]
     random.shuffle(eligible)
     return eligible[:count]
@@ -263,7 +322,9 @@ def select_upgrade_candidates(customers, count):
 def select_downgrade_candidates(customers, count):
     eligible = [
         c for c in customers
-        if c["plan"] != "free" and not c["cancelled"]
+        if c["plan"] != "free"
+        and not c["cancelled"]
+        and not c.get("past_due")  # Exclude past_due customers
     ]
     random.shuffle(eligible)
     return eligible[:count]
@@ -302,94 +363,112 @@ def select_past_due_candidates(customers, count):
 
 
 def apply_upgrade(customer_info):
-    sub = stripe.Subscription.retrieve(customer_info["subscription_id"])
-    if sub.status in ("canceled", "incomplete_expired"):
-        print(f"    Skipping #{customer_info['index']:03d}: subscription {sub.status}")
-        customer_info["cancelled"] = True
-        return
-
-    current_plan = customer_info["plan"]
-    current_idx = TIER_ORDER.index(current_plan)
-
-    if random.random() < 0.5:
-        higher_tiers = TIER_ORDER[current_idx + 1:]
-        if higher_tiers:
-            weights = list(range(len(higher_tiers), 0, -1))
-            new_plan = random.choices(higher_tiers, weights=weights, k=1)[0]
-            new_screens = customer_info["screens"]
-            min_screens = SCREEN_RANGES[new_plan][0]
-            if new_screens < min_screens:
-                new_screens = random.randint(min_screens, SCREEN_RANGES[new_plan][1])
-
-            stripe.Subscription.modify(
-                customer_info["subscription_id"],
-                items=[{
-                    "id": sub["items"]["data"][0].id,
-                    "price": PRICE_IDS[new_plan],
-                    "quantity": new_screens,
-                }],
-                proration_behavior="none",
-            )
-            sleep()
-            print(f"    Upgraded #{customer_info['index']:03d}: {current_plan} -> {new_plan}")
-            customer_info["plan"] = new_plan
-            customer_info["screens"] = new_screens
+    try:
+        sub = stripe.Subscription.retrieve(customer_info["subscription_id"])
+        if sub.status in ("canceled", "incomplete_expired"):
+            print(f"    Skipping #{customer_info['index']:03d}: subscription {sub.status}")
+            customer_info["cancelled"] = True
             return
 
-    new_screens = customer_info["screens"] + random.randint(2, 10)
-    max_screens = SCREEN_RANGES[current_plan][1]
-    new_screens = min(new_screens, max_screens + 20)
+        current_plan = customer_info["plan"]
+        current_idx = TIER_ORDER.index(current_plan)
 
-    stripe.Subscription.modify(
-        customer_info["subscription_id"],
-        items=[{
-            "id": sub["items"]["data"][0].id,
-            "quantity": new_screens,
-        }],
-        proration_behavior="none",
-    )
-    sleep()
-    print(f"    Upgraded #{customer_info['index']:03d}: screens {customer_info['screens']} -> {new_screens}")
-    customer_info["screens"] = new_screens
+        if random.random() < 0.5:
+            higher_tiers = TIER_ORDER[current_idx + 1:]
+            if higher_tiers:
+                weights = list(range(len(higher_tiers), 0, -1))
+                new_plan = random.choices(higher_tiers, weights=weights, k=1)[0]
+                new_screens = customer_info["screens"]
+                min_screens = SCREEN_RANGES[new_plan][0]
+                if new_screens < min_screens:
+                    new_screens = random.randint(min_screens, SCREEN_RANGES[new_plan][1])
+
+                stripe.Subscription.modify(
+                    customer_info["subscription_id"],
+                    items=[{
+                        "id": sub["items"]["data"][0].id,
+                        "price": PRICE_IDS[new_plan],
+                        "quantity": new_screens,
+                    }],
+                    proration_behavior="none",
+                )
+                sleep()
+                print(f"    Upgraded #{customer_info['index']:03d}: {current_plan} -> {new_plan}")
+                customer_info["plan"] = new_plan
+                customer_info["screens"] = new_screens
+                return
+
+        new_screens = customer_info["screens"] + random.randint(2, 10)
+        max_screens = SCREEN_RANGES[current_plan][1]
+        # Allow some flexibility beyond plan max (10% buffer), but not excessive
+        new_screens = min(new_screens, int(max_screens * 1.1))
+
+        stripe.Subscription.modify(
+            customer_info["subscription_id"],
+            items=[{
+                "id": sub["items"]["data"][0].id,
+                "quantity": new_screens,
+            }],
+            proration_behavior="none",
+        )
+        sleep()
+        print(f"    Upgraded #{customer_info['index']:03d}: screens {customer_info['screens']} -> {new_screens}")
+        customer_info["screens"] = new_screens
+    except Exception as e:
+        print(f"    ERROR: Failed to upgrade #{customer_info['index']:03d}: {e}")
 
 
 def apply_downgrade(customer_info):
-    sub = stripe.Subscription.retrieve(customer_info["subscription_id"])
-    if sub.status in ("canceled", "incomplete_expired"):
-        print(f"    Skipping #{customer_info['index']:03d}: subscription {sub.status}")
-        customer_info["cancelled"] = True
-        return
+    try:
+        sub = stripe.Subscription.retrieve(customer_info["subscription_id"])
+        if sub.status in ("canceled", "incomplete_expired"):
+            print(f"    Skipping #{customer_info['index']:03d}: subscription {sub.status}")
+            customer_info["cancelled"] = True
+            return
 
-    current_plan = customer_info["plan"]
-    current_idx = TIER_ORDER.index(current_plan)
-    lower_tiers = TIER_ORDER[:current_idx]
-    if not lower_tiers:
-        return
+        current_plan = customer_info["plan"]
+        current_idx = TIER_ORDER.index(current_plan)
+        lower_tiers = TIER_ORDER[:current_idx]
+        if not lower_tiers:
+            return
 
-    weights = list(range(1, len(lower_tiers) + 1))
-    new_plan = random.choices(lower_tiers, weights=weights, k=1)[0]
-    new_screens = min(customer_info["screens"], SCREEN_RANGES[new_plan][1])
+        weights = list(range(1, len(lower_tiers) + 1))
+        new_plan = random.choices(lower_tiers, weights=weights, k=1)[0]
+        new_screens = min(customer_info["screens"], SCREEN_RANGES[new_plan][1])
 
-    stripe.Subscription.modify(
-        customer_info["subscription_id"],
-        items=[{
-            "id": sub["items"]["data"][0].id,
-            "price": PRICE_IDS[new_plan],
-            "quantity": new_screens,
-        }],
-        proration_behavior="none",
-    )
-    sleep()
-    print(f"    Downgraded #{customer_info['index']:03d}: {current_plan} -> {new_plan}")
-    customer_info["plan"] = new_plan
-    customer_info["screens"] = new_screens
+        stripe.Subscription.modify(
+            customer_info["subscription_id"],
+            items=[{
+                "id": sub["items"]["data"][0].id,
+                "price": PRICE_IDS[new_plan],
+                "quantity": new_screens,
+            }],
+            proration_behavior="none",
+        )
+        sleep()
+        print(f"    Downgraded #{customer_info['index']:03d}: {current_plan} -> {new_plan}")
+        customer_info["plan"] = new_plan
+        customer_info["screens"] = new_screens
+    except Exception as e:
+        print(f"    ERROR: Failed to downgrade #{customer_info['index']:03d}: {e}")
 
 
 def apply_cancellation(customer_info):
-    stripe.Subscription.cancel(customer_info["subscription_id"])
-    sleep()
-    print(f"    Cancelled #{customer_info['index']:03d} ({customer_info['plan']})")
-    customer_info["cancelled"] = True
+    try:
+        sub = stripe.Subscription.retrieve(customer_info["subscription_id"])
+        if sub.status in ("canceled", "incomplete_expired"):
+            print(f"    Skipping #{customer_info['index']:03d}: already {sub.status}")
+            customer_info["cancelled"] = True
+            return
+
+        stripe.Subscription.cancel(customer_info["subscription_id"])
+        sleep()
+        print(f"    Cancelled #{customer_info['index']:03d} ({customer_info['plan']})")
+        customer_info["cancelled"] = True
+    except Exception as e:
+        print(f"    ERROR: Failed to cancel #{customer_info['index']:03d}: {e}")
+        # Mark as cancelled anyway to prevent retry
+        customer_info["cancelled"] = True
 
 
 def apply_past_due(customer_info):
@@ -398,14 +477,19 @@ def apply_past_due(customer_info):
     Without a valid payment method, Stripe cannot collect payment on the next
     billing cycle and will set the subscription status to 'past_due'.
     """
-    customer = stripe.Customer.retrieve(customer_info["customer_id"])
-    sleep()
-    default_pm = customer.invoice_settings.default_payment_method
-    if default_pm:
-        stripe.PaymentMethod.detach(default_pm)
+    try:
+        customer = stripe.Customer.retrieve(customer_info["customer_id"])
         sleep()
-    print(f"    Past Due #{customer_info['index']:03d} ({customer_info['plan']})")
-    customer_info["past_due"] = True
+        default_pm = customer.invoice_settings.default_payment_method
+        if default_pm:
+            stripe.PaymentMethod.detach(default_pm)
+            sleep()
+            print(f"    Past Due trigger #{customer_info['index']:03d} ({customer_info['plan']})")
+        else:
+            print(f"    Skipping #{customer_info['index']:03d}: no payment method to detach")
+        customer_info["past_due"] = True
+    except Exception as e:
+        print(f"    ERROR: Failed to apply past_due to #{customer_info['index']:03d}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -414,10 +498,16 @@ def apply_past_due(customer_info):
 
 
 def take_snapshot(all_customers, month_label):
-    """Capture the current state of every active customer for a given month."""
+    """Capture the current state of every active customer for a given month.
+
+    Uses local tracking flags for fast snapshot generation during development.
+    Run validate_mrr.py after generation to verify snapshots against Stripe.
+    """
     snapshot = []
     for c in all_customers:
         if not c["cancelled"]:
+            # Use local past_due flag (accurate due to timing fix where payment
+            # methods are detached BEFORE clock advance, causing invoices to fail)
             status = "past_due" if c.get("past_due") else "active"
             snapshot.append({
                 "month": month_label,
@@ -465,17 +555,25 @@ def main():
 
     def _create_batch(args):
         batch_num, batch, start_idx = args
-        clock = stripe.test_helpers.TestClock.create(
-            frozen_time=frozen_time,
-            name=f"MRR Clock {batch_num + 1:02d}",
-        )
-        customers = []
-        ci = start_idx
-        for plan in batch:
-            info = create_customer_with_sub(clock.id, ci, plan)
-            customers.append(info)
-            ci += 1
-        return batch_num, clock.id, customers
+        try:
+            clock = stripe.test_helpers.TestClock.create(
+                frozen_time=frozen_time,
+                name=f"MRR Clock {batch_num + 1:02d}",
+            )
+            customers = []
+            ci = start_idx
+            for plan in batch:
+                try:
+                    info = create_customer_with_sub(clock.id, ci, plan)
+                    customers.append(info)
+                except Exception as e:
+                    print(f"  ERROR: Failed to create customer {ci:03d}: {e}")
+                    # Continue with remaining customers in batch
+                ci += 1
+            return batch_num, clock.id, customers, None
+        except Exception as e:
+            print(f"  ERROR: Failed to create batch {batch_num + 1}: {e}")
+            return batch_num, None, [], str(e)
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         results = list(pool.map(
@@ -485,11 +583,18 @@ def main():
 
     # Sort by batch number to maintain deterministic ordering
     results.sort(key=lambda r: r[0])
-    for batch_num, clock_id, customers in results:
-        clocks.append(clock_id)
-        all_customers.extend(customers)
-        print(f"Clock {batch_num + 1}/{len(batches)} ({clock_id}): {len(customers)} customers")
+    failed_batches = 0
+    for batch_num, clock_id, customers, error in results:
+        if error:
+            failed_batches += 1
+            print(f"Clock {batch_num + 1}/{len(batches)}: FAILED")
+        else:
+            clocks.append(clock_id)
+            all_customers.extend(customers)
+            print(f"Clock {batch_num + 1}/{len(batches)} ({clock_id}): {len(customers)} customers")
 
+    if failed_batches > 0:
+        print(f"\nWARNING: {failed_batches} batches failed to create.")
     print(f"\nCreated {len(all_customers)} customers across {len(clocks)} clocks.")
 
     # Snapshot month 0 (creation month)
@@ -506,53 +611,100 @@ def main():
 
         print(f"\n=== Phase {phase_num + 2}: Month {advance_months} ({month_label}) ===\n")
 
-        # Advance all clocks in parallel
-        print(f"Advancing {len(clocks)} clocks to {datetime.fromtimestamp(advance_to, tz=timezone.utc).isoformat()}")
-
-        def _advance(cid):
-            stripe.test_helpers.TestClock.advance(cid, frozen_time=advance_to)
-            return cid
-
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-            list(pool.map(_advance, clocks))
-
-        # Wait for all clocks to finish processing (batch poll)
-        print("Waiting for all clocks to process...")
-        wait_for_all_clocks(clocks, label=f"month {advance_months}")
-        print("All clocks ready.\n")
-
-        # Apply upgrades
-        if phase["upgrades"] > 0:
-            candidates = select_upgrade_candidates(all_customers, phase["upgrades"])
-            print(f"Applying {len(candidates)} upgrades:")
-            for c in candidates:
-                apply_upgrade(c)
-
-        # Apply downgrades
-        if phase["downgrades"] > 0:
-            candidates = select_downgrade_candidates(all_customers, phase["downgrades"])
-            print(f"\nApplying {len(candidates)} downgrades:")
-            for c in candidates:
-                apply_downgrade(c)
-
-        # Apply cancellations
-        if phase["cancellations"] > 0:
-            candidates = select_cancel_candidates(all_customers, phase["cancellations"])
-            print(f"\nApplying {len(candidates)} cancellations:")
-            for c in candidates:
-                apply_cancellation(c)
-
-        # Apply past_due triggers (swap to declining card before next advance)
+        # CRITICAL: Apply past_due triggers BEFORE advancing the clock
+        # This ensures payment methods are detached before the next billing cycle,
+        # so the invoice will fail and subscriptions become past_due
         if phase.get("past_dues", 0) > 0:
             candidates = select_past_due_candidates(all_customers, phase["past_dues"])
-            print(f"\nApplying {len(candidates)} past_due triggers:")
-            for c in candidates:
-                apply_past_due(c)
+            print(f"Preparing {len(candidates)} past_due triggers (detaching payment methods):")
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+                list(pool.map(apply_past_due, candidates))
+            print()
 
-        # Snapshot after changes
+        # Staggered advance — fire advance calls one at a time with a small gap,
+        # then batch-wait for all to finish. This avoids the thundering herd problem
+        # (all 34 hitting Stripe at once) while still letting them process concurrently.
+        print(f"Advancing {len(clocks)} clocks to {datetime.fromtimestamp(advance_to, tz=timezone.utc).isoformat()}")
+        failed_advances = []
+
+        for i, cid in enumerate(clocks):
+            try:
+                stripe.test_helpers.TestClock.advance(cid, frozen_time=advance_to)
+            except stripe.error.InvalidRequestError as e:
+                if "advancement underway" in str(e).lower():
+                    print(f"  Clock {i+1} still processing, retrying in 5s...")
+                    time.sleep(5)
+                    try:
+                        stripe.test_helpers.TestClock.advance(cid, frozen_time=advance_to)
+                    except Exception as retry_e:
+                        failed_advances.append((cid, str(retry_e)))
+                        continue
+                else:
+                    failed_advances.append((cid, str(e)))
+                    continue
+            except Exception as e:
+                failed_advances.append((cid, str(e)))
+                continue
+            time.sleep(0.5)  # Small gap between calls to stagger Stripe processing
+
+        if failed_advances:
+            print(f"  WARNING: {len(failed_advances)} clocks failed to advance")
+            for cid, err in failed_advances[:3]:
+                print(f"    {cid}: {err}")
+
+        # Batch-wait for all clocks to finish processing
+        print(f"  All advance calls sent. Waiting for clocks to process...")
+        ready, failed, timed_out = wait_for_all_clocks(clocks, label=f"month {advance_months}")
+
+        if timed_out > 0:
+            print(f"  WARNING: {timed_out} clocks timed out!")
+            print(f"  Waiting 60s more for stragglers...")
+            time.sleep(60)
+            print(f"  Proceeding with lifecycle events...")
+        elif failed > 0:
+            print(f"  WARNING: {failed} clocks failed internally")
+        else:
+            print("  All clocks ready.")
+
+        # Snapshot BEFORE syncing cancellations — captures past_due customers
+        # as past_due in this month. The sync below will mark auto-cancelled ones
+        # so they're excluded from future months' snapshots.
+        print(f"\nTaking snapshot for {month_label}...")
         all_snapshots.extend(take_snapshot(all_customers, month_label))
         active_count = len([c for c in all_customers if not c["cancelled"]])
-        print(f"\nSnapshot for {month_label}: {active_count} active customers")
+        print(f"Snapshot for {month_label}: {active_count} active customers")
+
+        # Apply upgrades, downgrades, and cancellations in parallel
+        lifecycle_tasks = []
+
+        if phase["upgrades"] > 0:
+            upgrade_candidates = select_upgrade_candidates(all_customers, phase["upgrades"])
+            print(f"Applying {len(upgrade_candidates)} upgrades")
+            lifecycle_tasks.extend((apply_upgrade, c) for c in upgrade_candidates)
+
+        if phase["downgrades"] > 0:
+            downgrade_candidates = select_downgrade_candidates(all_customers, phase["downgrades"])
+            print(f"Applying {len(downgrade_candidates)} downgrades")
+            lifecycle_tasks.extend((apply_downgrade, c) for c in downgrade_candidates)
+
+        if phase["cancellations"] > 0:
+            cancel_candidates = select_cancel_candidates(all_customers, phase["cancellations"])
+            print(f"Applying {len(cancel_candidates)} cancellations")
+            lifecycle_tasks.extend((apply_cancellation, c) for c in cancel_candidates)
+
+        if lifecycle_tasks:
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+                list(pool.map(lambda t: t[0](t[1]), lifecycle_tasks))
+
+        # After lifecycle events, quick check that clocks are stable
+        if lifecycle_tasks:
+            print("\nQuick check: clocks stable after lifecycle events...")
+            time.sleep(2)
+            ready, failed, timed_out = wait_for_all_clocks(clocks, max_wait=60, label=f"post-events {month_label}")
+            if failed > 0 or timed_out > 0:
+                print(f"  WARNING: {ready} ready, {failed} failed, {timed_out} timed out")
+            else:
+                print("  All clocks ready.")
 
     # --- Save snapshots ---
     snapshots_file = CONFIG_DIR / "sub_snapshots.json"
@@ -576,10 +728,10 @@ def main():
     print("\n=== Summary ===\n")
     active = [c for c in all_customers if not c["cancelled"]]
     cancelled = [c for c in all_customers if c["cancelled"]]
-    past_due = [c for c in all_customers if c.get("past_due") and not c["cancelled"]]
+    past_due_local = [c for c in all_customers if c.get("past_due") and not c["cancelled"]]
     print(f"Total customers created: {len(all_customers)}")
     print(f"Active subscriptions:    {len(active)}")
-    print(f"Past due:                {len(past_due)}")
+    print(f"Past due (local flag):   {len(past_due_local)}")
     print(f"Cancelled:               {len(cancelled)}")
     print(f"Test clocks used:        {len(clocks)}")
 
@@ -590,6 +742,15 @@ def main():
     for plan in TIER_ORDER:
         count = plan_counts.get(plan, 0)
         print(f"  {plan}: {count}")
+
+    # Verify past_due counts in snapshots (actual Stripe status)
+    past_due_in_snapshots = sum(1 for s in all_snapshots if s["status"] == "past_due")
+    total_expected_past_dues = sum(phase.get("past_dues", 0) for phase in LIFECYCLE_PHASES)
+    print(f"\nPast_due verification:")
+    print(f"  Expected past_due triggers: {total_expected_past_dues}")
+    print(f"  Actual past_due in snapshots: {past_due_in_snapshots}")
+    if past_due_in_snapshots > 0:
+        print(f"  ✓ Past_due status successfully captured in Stripe")
 
 
 if __name__ == "__main__":

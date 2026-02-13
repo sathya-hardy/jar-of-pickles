@@ -29,10 +29,11 @@ Stripe Test Mode → generate_data.py (test clocks + snapshots)
 ## Pipeline Steps
 
 1. **Seed Prices** (`scripts/seed_prices.py`) — Creates 5 Stripe products and prices. Run once.
-2. **Generate Data** (`scripts/generate_data.py`) — Creates 100 test customers using Stripe test clocks. Simulates 6 months of billing with upgrades, downgrades, cancellations, and past-due events (via declining payment methods) spread across each month. Saves monthly subscription snapshots to `config/sub_snapshots.json`.
-3. **ETL Pipeline** (`etl/extract_load.py`) — Loads subscription snapshots into BigQuery, extracts raw invoices/subscriptions from Stripe for reference, and creates views for MRR, ARPPU, and plan breakdowns.
-4. **API Server** (`api/main.py`) — FastAPI backend serving dashboard data from BigQuery.
-5. **Dashboard** (`frontend/`) — Vite + React + TypeScript + Tailwind CSS + Recharts.
+2. **Generate Data** (`scripts/generate_data.py`) — Creates 100 test customers using Stripe test clocks. Simulates 6 months of billing with upgrades, downgrades, cancellations, and past-due events (via detaching payment methods) spread across each month. Saves monthly subscription snapshots to `config/sub_snapshots.json`.
+3. **Validate Data** (`scripts/validate_mrr.py`) — *(Optional)* Cross-validates snapshot data against Stripe's live subscription API to verify accuracy. Compares plans, quantities, MRR calculations, and subscription statuses.
+4. **ETL Pipeline** (`etl/extract_load.py`) — Loads subscription snapshots into BigQuery and creates views for MRR, ARPPU, churn, and plan breakdowns.
+5. **API Server** (`api/main.py`) — FastAPI backend serving dashboard data from BigQuery.
+6. **Dashboard** (`frontend/`) — Vite + React + TypeScript + Tailwind CSS + Recharts.
 
 ## Pricing Tiers
 
@@ -59,20 +60,33 @@ Changes are spread across all 6 months (1 advance per month) for realistic, grad
 
 ## Performance
 
-`generate_data.py` uses `ThreadPoolExecutor` (10 workers) to parallelize Stripe API calls wherever possible:
+`generate_data.py` uses a mix of parallel and sequential strategies to balance speed with Stripe's backend capacity:
 
 | Phase | Operation | Strategy |
 |-------|-----------|----------|
 | Cleanup | Delete existing test clocks | Parallel deletion via thread pool |
 | Phase 1 | Create clocks + customers | All 34 batches run concurrently (each batch: 1 clock + 3 customers, sequential within batch) |
-| Phases 2–7 | Advance clocks | All 34 clocks advanced in parallel |
-| Phases 2–7 | Wait for clocks | Batch polling — all clocks checked in a single loop rather than one at a time |
+| Phases 2–7 | Advance clocks | Sequential — one clock at a time, wait for ready before next. Avoids Stripe backend contention (parallel advances create resource competition and are slower). |
+| Phases 2–7 | Lifecycle events | Upgrades, downgrades, cancellations run in parallel |
+| Phases 2–7 | Take snapshots | Instant — uses local tracking flags (no API calls) |
 
-This reduces total runtime from ~45 minutes (fully sequential) to ~15 minutes.
+Stripe limits test clocks to 3 customers each, requiring 34 clocks for 100 customers.
+
+**Validation is separate:** Run `validate_mrr.py` after generation to verify snapshots against Stripe (adds ~30 seconds).
 
 ## How MRR is Calculated
 
-MRR is derived from **subscription snapshots**, not Stripe invoices. Each month, `generate_data.py` captures the exact state of every active subscription (plan, screen count, price). This avoids issues with Stripe's inconsistent invoice generation on test clocks and gives perfectly accurate, stable metrics.
+MRR is derived from **subscription snapshots**, not Stripe invoices. Each month, `generate_data.py` captures the exact state of every active subscription (plan, screen count, price, status).
+
+**Snapshot approach:**
+- Uses local tracking flags for fast generation during development
+- Past_due timing is accurate (payment methods detached BEFORE clock advance)
+- Run `validate_mrr.py` after generation to verify snapshots match Stripe's live data
+- Automated tests also cross-validate snapshots against Stripe
+
+**Past-due and auto-cancellation:** Stripe automatically cancels past_due subscriptions after exhausting its payment retry schedule. With test clocks, this can happen within a single advance (time is compressed). These auto-cancelled customers are detected by lifecycle events and excluded from subsequent snapshots, keeping the data in sync with Stripe.
+
+This avoids issues with Stripe's inconsistent invoice generation on test clocks and gives perfectly accurate, stable metrics.
 
 ## Prerequisites
 
@@ -101,6 +115,8 @@ cp .env.example .env
 
 The GCP service account needs these roles: **BigQuery Data Editor** + **BigQuery User**.
 
+**Security note:** Both `.env` and `service-account.json` are in `.gitignore` to prevent accidentally committing credentials.
+
 ### 2. Install dependencies
 
 ```bash
@@ -115,6 +131,9 @@ uv run python scripts/seed_prices.py
 
 # Step 2: Generate 100 test customers with 6 months of billing history
 uv run python scripts/generate_data.py
+
+# Step 2b (optional): Verify snapshots match Stripe's live data
+uv run python scripts/validate_mrr.py
 
 # Step 3: Extract from Stripe, load snapshots to BigQuery, create views
 uv run python etl/extract_load.py
@@ -133,12 +152,11 @@ Open [http://localhost:5173](http://localhost:5173) to view the dashboard.
 ## Dashboard Metrics
 
 - **MRR Trend** — Monthly recurring revenue over time
-- **Revenue by Plan** — MRR breakdown by pricing tier (stacked area chart)
+- **Revenue by Plan** — MRR breakdown by pricing tier (donut chart)
 - **ARPPU Trend** — Average Revenue Per Paying User
 - **Customer Count** — Total and paying customers over time
 - **Customers by Plan** — Customer count per tier per month (stacked bar chart)
-- **Past Due** — Number of customers with failed payments (subscription still active but at risk)
-- **At Risk MRR** — Revenue from past-due customers that may churn
+- **Churn Rate** — Percentage of customers lost month-over-month
 
 ## Key Config Files
 

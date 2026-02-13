@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { DollarSign, TrendingUp, Users, UsersRound, BarChart3, UserMinus, AlertTriangle, ShieldAlert } from 'lucide-react'
+import { DollarSign, TrendingUp, Users, UsersRound, BarChart3, UserMinus } from 'lucide-react'
 
 interface MrrDataPoint {
   month: string
@@ -7,8 +7,6 @@ interface MrrDataPoint {
   paying_customers: number
   total_customers: number
   active_subscriptions: number
-  past_due_customers: number
-  at_risk_mrr: number
 }
 
 interface ArpuDataPoint {
@@ -91,8 +89,8 @@ export function SummaryCards() {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 lg:gap-3 h-full">
-        {[...Array(8)].map((_, i) => (
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 lg:gap-3 h-full">
+        {[...Array(6)].map((_, i) => (
           <div key={i} className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 animate-pulse transition-colors duration-200">
             <div className="h-3 bg-gray-200 dark:bg-slate-600 rounded w-20 mb-3"></div>
             <div className="h-6 bg-gray-200 dark:bg-slate-600 rounded w-28"></div>
@@ -191,40 +189,10 @@ export function SummaryCards() {
           ? 'text-emerald-600 dark:text-emerald-400'
           : undefined,
     },
-    {
-      label: 'Past Due',
-      tooltip: 'Customers whose payment failed. Their subscription is still active but at risk of churn.',
-      value: latest ? latest.past_due_customers.toString() : '\u2014',
-      icon: AlertTriangle,
-      iconColor: latest && latest.past_due_customers > 0
-        ? 'text-amber-600 dark:text-amber-400'
-        : 'text-emerald-600 dark:text-emerald-400',
-      iconBg: latest && latest.past_due_customers > 0
-        ? 'bg-amber-50 dark:bg-amber-900/30'
-        : 'bg-emerald-50 dark:bg-emerald-900/30',
-      valueColor: latest && latest.past_due_customers > 0
-        ? 'text-amber-600 dark:text-amber-400'
-        : undefined,
-    },
-    {
-      label: 'At Risk MRR',
-      tooltip: 'Monthly revenue from past-due customers — subscriptions still active but payment has failed.',
-      value: latest ? formatDollar(latest.at_risk_mrr) : '\u2014',
-      icon: ShieldAlert,
-      iconColor: latest && latest.at_risk_mrr > 0
-        ? 'text-amber-600 dark:text-amber-400'
-        : 'text-emerald-600 dark:text-emerald-400',
-      iconBg: latest && latest.at_risk_mrr > 0
-        ? 'bg-amber-50 dark:bg-amber-900/30'
-        : 'bg-emerald-50 dark:bg-emerald-900/30',
-      valueColor: latest && latest.at_risk_mrr > 0
-        ? 'text-amber-600 dark:text-amber-400'
-        : undefined,
-    },
   ]
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 lg:gap-3 h-full">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 lg:gap-3 h-full">
       {cards.map((card) => {
         const Icon = card.icon
         return (

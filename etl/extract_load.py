@@ -11,6 +11,7 @@ Run: uv run python etl/extract_load.py
 
 import json
 import os
+import sys
 from pathlib import Path
 import pandas as pd
 from google.cloud import bigquery
@@ -18,10 +19,23 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Validate required environment variables
 PROJECT_ID = os.getenv("GCP_PROJECT_ID")
+if not PROJECT_ID:
+    print("ERROR: GCP_PROJECT_ID environment variable is not set.")
+    print("Set it in your .env file or export it:")
+    print("  export GCP_PROJECT_ID=your-project-id")
+    sys.exit(1)
+
 DATASET = os.getenv("BQ_DATASET", "stripe_mrr")
 
-bq_client = bigquery.Client(project=PROJECT_ID)
+# Initialize BigQuery client with error handling
+try:
+    bq_client = bigquery.Client(project=PROJECT_ID)
+except Exception as e:
+    print(f"ERROR: Failed to initialize BigQuery client: {e}")
+    print("Ensure you have proper GCP credentials configured.")
+    sys.exit(1)
 
 # Load subscription snapshots
 SNAPSHOTS_FILE = Path(__file__).resolve().parent.parent / "config" / "sub_snapshots.json"
@@ -29,10 +43,23 @@ SNAPSHOTS_FILE = Path(__file__).resolve().parent.parent / "config" / "sub_snapsh
 if not SNAPSHOTS_FILE.exists():
     print(f"ERROR: {SNAPSHOTS_FILE} not found.")
     print("Run generate_data.py first:  uv run python scripts/generate_data.py")
-    exit(1)
+    sys.exit(1)
 
-with open(SNAPSHOTS_FILE) as f:
-    SUB_SNAPSHOTS = json.load(f)
+try:
+    with open(SNAPSHOTS_FILE) as f:
+        SUB_SNAPSHOTS = json.load(f)
+except json.JSONDecodeError as e:
+    print(f"ERROR: Failed to parse {SNAPSHOTS_FILE}: {e}")
+    print("The file may be corrupted. Re-run generate_data.py")
+    sys.exit(1)
+except Exception as e:
+    print(f"ERROR: Failed to load {SNAPSHOTS_FILE}: {e}")
+    sys.exit(1)
+
+if not SUB_SNAPSHOTS:
+    print(f"ERROR: {SNAPSHOTS_FILE} is empty.")
+    print("Run generate_data.py first:  uv run python scripts/generate_data.py")
+    sys.exit(1)
 
 print(f"Loaded {len(SUB_SNAPSHOTS)} subscription snapshots.")
 
@@ -43,11 +70,16 @@ def ensure_dataset():
     try:
         bq_client.get_dataset(dataset_ref)
         print(f"Dataset {DATASET} already exists.")
-    except Exception:
-        dataset = bigquery.Dataset(dataset_ref)
-        dataset.location = "US"
-        bq_client.create_dataset(dataset)
-        print(f"Created dataset {DATASET}.")
+    except Exception as e:
+        # Dataset doesn't exist, try to create it
+        try:
+            dataset = bigquery.Dataset(dataset_ref)
+            dataset.location = "US"
+            bq_client.create_dataset(dataset)
+            print(f"Created dataset {DATASET}.")
+        except Exception as create_error:
+            print(f"ERROR: Failed to create dataset {DATASET}: {create_error}")
+            raise
 
 
 def load_to_bigquery(rows, table_name, schema):
@@ -57,16 +89,29 @@ def load_to_bigquery(rows, table_name, schema):
         return
 
     table_id = f"{PROJECT_ID}.{DATASET}.{table_name}"
-    df = pd.DataFrame(rows)
+
+    try:
+        df = pd.DataFrame(rows)
+    except Exception as e:
+        print(f"ERROR: Failed to create DataFrame for {table_name}: {e}")
+        raise
 
     job_config = bigquery.LoadJobConfig(
         schema=schema,
         write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
     )
 
-    job = bq_client.load_table_from_dataframe(df, table_id, job_config=job_config)
-    job.result()
-    print(f"Loaded {len(rows)} rows into {table_id}.")
+    try:
+        job = bq_client.load_table_from_dataframe(df, table_id, job_config=job_config)
+        # Wait for job with 5 minute timeout
+        job.result(timeout=300)
+        print(f"Loaded {len(rows)} rows into {table_id}.")
+    except TimeoutError:
+        print(f"ERROR: BigQuery load job timed out after 5 minutes for {table_id}")
+        raise
+    except Exception as e:
+        print(f"ERROR: Failed to load data into {table_id}: {e}")
+        raise
 
 
 def create_views():
@@ -83,6 +128,8 @@ def create_views():
     ]
     plan_case_expr = "\n".join(plan_case_lines)
 
+    views = []
+
     # View 1: mrr_monthly
     mrr_sql = f"""
     CREATE OR REPLACE VIEW `{PROJECT_ID}.{DATASET}.mrr_monthly` AS
@@ -98,8 +145,7 @@ def create_views():
     GROUP BY month
     ORDER BY month ASC
     """
-    bq_client.query(mrr_sql).result()
-    print(f"  Created view {DATASET}.mrr_monthly")
+    views.append(("mrr_monthly", mrr_sql))
 
     # View 2: mrr_by_plan
     mrr_by_plan_sql = f"""
@@ -115,8 +161,7 @@ def create_views():
     GROUP BY month, plan_name
     ORDER BY month ASC, plan_name ASC
     """
-    bq_client.query(mrr_by_plan_sql).result()
-    print(f"  Created view {DATASET}.mrr_by_plan")
+    views.append(("mrr_by_plan", mrr_by_plan_sql))
 
     # View 3: arppu_monthly
     arppu_sql = f"""
@@ -132,8 +177,7 @@ def create_views():
     FROM `{PROJECT_ID}.{DATASET}.mrr_monthly`
     ORDER BY month ASC
     """
-    bq_client.query(arppu_sql).result()
-    print(f"  Created view {DATASET}.arppu_monthly")
+    views.append(("arppu_monthly", arppu_sql))
 
     # View 4: customers_by_plan
     customers_by_plan_sql = f"""
@@ -149,8 +193,7 @@ def create_views():
     GROUP BY month, plan_name
     ORDER BY month ASC, plan_name ASC
     """
-    bq_client.query(customers_by_plan_sql).result()
-    print(f"  Created view {DATASET}.customers_by_plan")
+    views.append(("customers_by_plan", customers_by_plan_sql))
 
     # View 5: churn_monthly
     churn_sql = f"""
@@ -170,8 +213,20 @@ def create_views():
     FROM `{PROJECT_ID}.{DATASET}.mrr_monthly`
     ORDER BY month ASC
     """
-    bq_client.query(churn_sql).result()
-    print(f"  Created view {DATASET}.churn_monthly")
+    views.append(("churn_monthly", churn_sql))
+
+    # Execute all view creation queries with error handling
+    failed_views = []
+    for view_name, sql in views:
+        try:
+            bq_client.query(sql).result(timeout=60)
+            print(f"  Created view {DATASET}.{view_name}")
+        except Exception as e:
+            print(f"  ERROR: Failed to create view {view_name}: {e}")
+            failed_views.append(view_name)
+
+    if failed_views:
+        raise RuntimeError(f"Failed to create {len(failed_views)} views: {', '.join(failed_views)}")
 
 
 def main():

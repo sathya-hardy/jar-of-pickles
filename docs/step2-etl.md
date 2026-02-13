@@ -2,7 +2,7 @@
 
 ## Overview
 
-`etl/extract_load.py` loads subscription snapshots into BigQuery and extracts raw invoices/subscriptions from Stripe for reference. MRR calculations are driven by snapshots (not invoices) for accuracy. The pipeline is idempotent — each run truncates and reloads all tables.
+`etl/extract_load.py` loads subscription snapshots into BigQuery and creates views for MRR, ARPPU, churn, and plan breakdowns. MRR calculations are driven by snapshots (not invoices) for accuracy. The pipeline is idempotent — each run truncates and reloads all tables.
 
 ## Prerequisites
 
@@ -21,10 +21,7 @@ uv run python etl/extract_load.py
 
 1. **Creates dataset** `stripe_mrr` in BigQuery if it doesn't exist
 2. **Loads subscription snapshots** from `config/sub_snapshots.json` into `sub_snapshots` table (source of truth for MRR)
-3. **Extracts invoices** via `stripe.Invoice.search()` with auto-pagination (reference only)
-4. **Extracts subscriptions** via `stripe.Subscription.search()` with auto-pagination (reference only)
-5. **Filters** all Stripe data to only customers from the current run (reads `config/current_run.json`)
-6. **Creates views** for MRR, MRR by plan, ARPPU, and customers by plan
+3. **Creates views** for MRR, MRR by plan, ARPPU, customers by plan, and churn
 
 ## BigQuery Tables
 
@@ -40,37 +37,7 @@ uv run python etl/extract_load.py
 | price_amount | INTEGER | Price per screen in cents |
 | screens | INTEGER | Number of screens |
 | mrr_cents | INTEGER | `price_amount × screens` |
-
-### `stripe_mrr.raw_invoices` (reference)
-
-| Column | Type | Source |
-|--------|------|--------|
-| invoice_id | STRING | `invoice.id` |
-| customer_id | STRING | `invoice.customer` |
-| subscription_id | STRING | `parent.subscription_details.subscription` |
-| status | STRING | `invoice.status` |
-| amount_paid | INTEGER | `invoice.amount_paid` (cents) |
-| currency | STRING | `invoice.currency` |
-| price_id | STRING | `line_item.pricing.price_details.price` |
-| period_start | TIMESTAMP | `invoice.period_start` |
-| period_end | TIMESTAMP | `invoice.period_end` |
-| created | TIMESTAMP | `invoice.created` |
-
-### `stripe_mrr.raw_subscriptions` (reference)
-
-| Column | Type | Source |
-|--------|------|--------|
-| subscription_id | STRING | `sub.id` |
-| customer_id | STRING | `sub.customer` |
-| status | STRING | `sub.status` |
-| price_id | STRING | `sub.items.data[0].price.id` |
-| price_amount | INTEGER | `sub.items.data[0].price.unit_amount` (cents) |
-| price_interval | STRING | `sub.items.data[0].price.recurring.interval` |
-| quantity | INTEGER | `sub.items.data[0].quantity` (screens) |
-| current_period_start | TIMESTAMP | `item.current_period_start` |
-| current_period_end | TIMESTAMP | `item.current_period_end` |
-| created | TIMESTAMP | `sub.created` |
-| canceled_at | TIMESTAMP | `sub.canceled_at` (nullable) |
+| status | STRING | `active` or `past_due` |
 
 ## BigQuery Views
 
@@ -85,6 +52,9 @@ Average Revenue Per Paying User per month. Derived from `mrr_monthly`.
 
 ### `stripe_mrr.customers_by_plan`
 Customer count per plan tier per month. Derived from `sub_snapshots`.
+
+### `stripe_mrr.churn_monthly`
+Monthly customer churn rate. Uses `LAG()` over `mrr_monthly` to compare total customers month-over-month.
 
 ## Why Snapshots Instead of Invoices?
 

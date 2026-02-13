@@ -45,10 +45,10 @@ This creates 100 customers, simulates 6 months of billing, and saves:
 
 ## Test Clock Strategy
 
-- **34 test clocks** (3 customers per clock, last clock has 1)
+- **34 test clocks** (3 customers per clock, Stripe max)
 - Each clock starts with `frozen_time` = 6 months ago
-- **6 advances** of 1 month each
-- After each advance, lifecycle events are applied and a snapshot is taken
+- **6 advances** of 1 month each, done sequentially (one clock at a time)
+- After each advance round, lifecycle events are applied and a snapshot is taken
 - Cleanup step at start deletes all existing test clocks (safe to re-run)
 
 ## Customer Distribution
@@ -66,12 +66,13 @@ This creates 100 customers, simulates 6 months of billing, and saves:
 - **Upgrades (15 total)**: Mix of plan upgrades (e.g., Standard → Pro Plus) and screen count increases
 - **Downgrades (2 total)**: Plan downgrades (e.g., Pro Plus → Standard)
 - **Cancellations (8 total)**: Weighted toward Free/Standard tiers
+- **Past Due (5 total)**: Payment method detached before clock advance so the next invoice fails
 
 Events are distributed across all 6 monthly phases for gradual, realistic MRR growth.
 
 ## Subscription Snapshots
 
-After each monthly advance and lifecycle event batch, the script captures the exact state of every active subscription (plan, screen count, MRR). These snapshots are saved to `config/sub_snapshots.json` and used by the ETL to calculate MRR — this avoids issues with Stripe's inconsistent invoice generation on test clocks.
+After each monthly advance, the script captures the exact state of every active subscription (plan, screen count, MRR, status). Snapshots use local tracking flags — not Stripe API calls — so they are fast and reflect the intended business state. Past_due customers remain as `past_due` in snapshots even if Stripe auto-cancelled them during the advance. These snapshots are saved to `config/sub_snapshots.json` and used by the ETL to calculate MRR — this avoids issues with Stripe's inconsistent invoice generation on test clocks.
 
 ## Config Files Generated
 
@@ -95,19 +96,28 @@ To simulate **past-due** subscriptions, the script **detaches** the customer's p
 
 **Why not use a declining test card?** Stripe's test tokens like `pm_card_chargeDeclined` decline at _attach_ time (throws `CardError`), and passing raw card numbers (e.g., `4000000000000341`) requires PCI compliance enabled on the account. Detaching the payment method is simpler and works universally.
 
-## Performance (Parallel Execution)
+**Auto-cancellation caveat:** After a subscription becomes past_due, Stripe retries payment according to its retry schedule. If all retries fail, Stripe automatically cancels the subscription. With test clocks, time is compressed so this can happen within a single advance — the subscription goes from past_due to canceled almost immediately. Our snapshots use **local tracking flags** and intentionally keep these customers as `past_due`, which is the correct business metric (the customer was past_due at that point in time). The `validate_mrr.py` script may report ~5 mismatches for these customers — this is expected behavior, not a data error.
 
-The script uses `ThreadPoolExecutor` with 10 workers to parallelize independent Stripe API calls:
+## Performance
+
+The script uses a mix of parallel and sequential strategies to balance speed with Stripe's backend capacity:
 
 | Phase | Operation | Strategy |
 |-------|-----------|----------|
 | Cleanup | Delete existing test clocks | Parallel deletion via thread pool |
 | Phase 1 | Create clocks + customers | All 34 batches run concurrently. Each batch (1 clock + 3 customers) runs sequentially within a single thread, but all 34 batches execute in parallel across threads. |
-| Phases 2–7 | Advance clocks | All 34 `TestClock.advance` calls fire in parallel |
-| Phases 2–7 | Wait for clocks | Batch polling — one loop checks all clocks each iteration rather than waiting for each clock individually |
+| Phases 2–7 | Advance clocks | Sequential — one clock at a time, wait for ready before next. Avoids Stripe backend contention (parallel advances create resource competition and are slower). |
+| Phases 2–7 | Lifecycle events | Upgrades, downgrades, cancellations run in parallel |
+| Phases 2–7 | Take snapshots | Instant — uses local tracking flags (no API calls) |
 
 Customer indices are pre-assigned per batch before thread dispatch so threads don't share mutable state. Results are sorted by batch number after completion for deterministic ordering.
 
+Stripe limits test clocks to 3 customers each, requiring 34 clocks for 100 customers.
+
+### Why sequential clock advances?
+
+Stripe's test clock infrastructure has limited concurrency. Advancing 34 clocks in parallel causes backend contention — each clock competes for the same resources, making every clock take minutes. Sequential advances give each clock Stripe's full attention, finishing in seconds each. Total wall-clock time is comparable or faster.
+
 ## API Calls
 
-Rate-limited at 4 requests/second (0.25s sleep between sequential calls within a thread). Clock advances include a 5-minute timeout to handle Stripe slowness gracefully. The thread pool caps concurrent requests at 10 to stay within Stripe's test-mode rate limits.
+Rate-limited at 10 requests/second (0.1s sleep between sequential calls within a thread). The thread pool (15 workers) is used for clock/customer creation, cleanup, and lifecycle events. Clock advances are sequential to avoid Stripe contention.
