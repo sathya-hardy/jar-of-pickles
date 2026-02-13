@@ -12,18 +12,14 @@ A complete pipeline for generating, extracting, transforming, and visualizing Mo
 
 ## Architecture
 
-```
-Stripe Test Mode → generate_data.py (test clocks + snapshots)
-                         ↓
-                  config/sub_snapshots.json + config/current_run.json
-                         ↓
-                  extract_load.py (snapshots → BigQuery)
-                         ↓
-                  BigQuery Views (MRR, ARPPU, churn, plan breakdowns)
-                         ↓
-                  FastAPI (port 8888)
-                         ↓
-                  React Dashboard (port 5173)
+```mermaid
+flowchart TD
+    A[Stripe Test Mode] --> B[generate_data.py\ntest clocks + snapshots]
+    B --> C[config/sub_snapshots.json\n+ config/current_run.json]
+    C --> D[extract_load.py\nsnapshots → BigQuery]
+    D --> E[BigQuery Views\nMRR · ARPPU · Churn · Plan Breakdowns]
+    E --> F[FastAPI\nport 8888]
+    F --> G[React Dashboard\nport 5173]
 ```
 
 ## Pipeline Steps
