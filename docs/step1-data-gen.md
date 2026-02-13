@@ -87,16 +87,13 @@ After each monthly advance and lifecycle event batch, the script captures the ex
 2. [Stripe Dashboard → Test Clocks](https://dashboard.stripe.com/test/test-clocks) — should see 34 clocks
 3. [Stripe Dashboard → Invoices](https://dashboard.stripe.com/test/invoices) — should see invoices spanning 6 months
 
-## Stripe Test Cards
+## Stripe Test Cards & Past-Due Simulation
 
-The script uses two Stripe test payment methods:
+The script uses `pm_card_visa` as the default payment method for all customers (always succeeds).
 
-| Card | Where | Purpose |
-|------|-------|---------|
-| `pm_card_visa` | Customer creation | Default payment method — always succeeds |
-| `4000 0000 0000 0341` | Past-due simulation | Attaches to a customer successfully, but **declines on charge**. When set as the default payment method, the next billing cycle charge fails and Stripe moves the subscription to `past_due`. |
+To simulate **past-due** subscriptions, the script **detaches** the customer's payment method entirely. Without a valid payment method, Stripe cannot collect payment on the next billing cycle and automatically sets the subscription status to `past_due`.
 
-**Why not `pm_card_chargeDeclined`?** That token declines at _attach_ time (throws `CardError` during `PaymentMethod.attach`), so it can never be set as the customer's default. Card `4000000000000341` is Stripe's dedicated "attach succeeds, charge fails" test card.
+**Why not use a declining test card?** Stripe's test tokens like `pm_card_chargeDeclined` decline at _attach_ time (throws `CardError`), and passing raw card numbers (e.g., `4000000000000341`) requires PCI compliance enabled on the account. Detaching the payment method is simpler and works universally.
 
 ## Performance (Parallel Execution)
 

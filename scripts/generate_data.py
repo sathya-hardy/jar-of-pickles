@@ -393,30 +393,17 @@ def apply_cancellation(customer_info):
 
 
 def apply_past_due(customer_info):
-    """Switch customer to a declining card so the next invoice charge fails.
+    """Detach the customer's payment method so the next invoice charge fails.
 
-    Stripe will automatically set the subscription status to 'past_due'
-    when the next billing attempt uses this card and the charge is declined.
+    Without a valid payment method, Stripe cannot collect payment on the next
+    billing cycle and will set the subscription status to 'past_due'.
     """
-    # Create a test card that attaches OK but always declines on charge.
-    # Card 4000_0000_0000_0341 is Stripe's "attach succeeds, charge fails" test card.
-    pm = stripe.PaymentMethod.create(
-        type="card",
-        card={
-            "number": "4000000000000341",
-            "exp_month": 12,
-            "exp_year": 2030,
-            "cvc": "123",
-        },
-    )
-    stripe.PaymentMethod.attach(pm.id, customer=customer_info["customer_id"])
+    customer = stripe.Customer.retrieve(customer_info["customer_id"])
     sleep()
-    # Set the declining card as the default so the next auto-charge uses it
-    stripe.Customer.modify(
-        customer_info["customer_id"],
-        invoice_settings={"default_payment_method": pm.id},
-    )
-    sleep()
+    default_pm = customer.invoice_settings.default_payment_method
+    if default_pm:
+        stripe.PaymentMethod.detach(default_pm)
+        sleep()
     print(f"    Past Due #{customer_info['index']:03d} ({customer_info['plan']})")
     customer_info["past_due"] = True
 
