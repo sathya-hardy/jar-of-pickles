@@ -124,6 +124,63 @@ Open [http://localhost:5173](http://localhost:5173) to view the dashboard.
 | `config/current_run.json` | `generate_data.py` | `extract_load.py` (filters to current run's customers) |
 | `config/sub_snapshots.json` | `generate_data.py` | `extract_load.py` (source of truth for MRR) |
 
+## Testing & Validation
+
+The project includes automated tests to verify data integrity and cross-validate against Stripe's live API.
+
+### How to run
+
+```bash
+# Run the full test suite
+uv run python -m pytest tests/test_snapshots.py -v
+
+# Run only offline integrity tests (no Stripe credentials needed)
+uv run python -m pytest tests/test_snapshots.py -v -k "SnapshotIntegrity"
+
+# Run only Stripe cross-validation tests (requires STRIPE_SECRET_KEY in .env)
+uv run python -m pytest tests/test_snapshots.py -v -k "StripeCrossValidation"
+
+# Or run the standalone validation script for a human-readable report
+uv run python scripts/validate_mrr.py
+```
+
+### Test breakdown
+
+**`SnapshotIntegrityTests`** — Offline checks against `config/sub_snapshots.json`. No Stripe credentials needed.
+
+| Test | What it checks |
+|------|----------------|
+| `test_snapshots_not_empty` | Snapshot file has data |
+| `test_mrr_cents_equals_price_times_screens` | `mrr_cents == price_amount * screens` for every row |
+| `test_no_duplicate_customers_per_month` | Each customer appears at most once per month |
+| `test_price_amount_matches_plan` | Price amounts match the known price for each plan tier |
+| `test_screens_positive` | No row has 0 or negative screens |
+| `test_all_months_present` | Exactly 7 months exist (month 0 + 6 advances) |
+
+**`StripeCrossValidationTests`** — Compares the latest month's snapshots against Stripe's live subscription API. Requires `STRIPE_SECRET_KEY` in `.env`.
+
+| Test | What it checks |
+|------|----------------|
+| `test_plan_matches_stripe` | Snapshot plan tier matches Stripe's current price for each subscription |
+| `test_quantity_matches_stripe` | Snapshot screen count matches Stripe's subscription quantity |
+| `test_mrr_matches_stripe` | Snapshot `mrr_cents` matches `unit_amount * quantity` from Stripe |
+| `test_total_mrr_matches_stripe` | Aggregate MRR across all snapshots matches the sum from Stripe |
+
+### When to run
+
+| Moment | Which tests | Why |
+|--------|-------------|-----|
+| After `generate_data.py` | All | Confirm the pipeline produced correct data that matches Stripe |
+| After modifying snapshot logic | All | Catch regressions |
+| Before `extract_load.py` | Integrity tests | Don't load bad data into BigQuery |
+
+### Skip behavior
+
+Tests auto-skip gracefully when prerequisites aren't met:
+
+- **No `sub_snapshots.json`**: All tests skip — run `generate_data.py` first
+- **No `STRIPE_SECRET_KEY`**: Only Stripe cross-validation tests skip; integrity tests still run
+
 ## Re-running
 
 - **`seed_prices.py`** — Only run once. Products/prices persist in Stripe.
