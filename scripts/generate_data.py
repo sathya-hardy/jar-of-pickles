@@ -20,6 +20,7 @@ import json
 import os
 import time
 import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -89,6 +90,7 @@ LIFECYCLE_PHASES = [
 ]
 
 RATE_LIMIT_SLEEP = 0.25  # seconds between API calls
+MAX_WORKERS = 10         # thread pool size (stays well under Stripe's 25 req/s test limit)
 
 
 def sleep():
@@ -97,31 +99,37 @@ def sleep():
 
 
 def cleanup_existing_test_clocks():
-    """Delete all existing test clocks to start fresh."""
+    """Delete all existing test clocks in parallel."""
     print("=== Cleanup: Deleting existing test clocks ===\n")
-    clocks = stripe.test_helpers.TestClock.list(limit=100)
-    count = 0
-    for clock in clocks.auto_paging_iter():
-        retries = 0
-        while clock.status == "advancing" and retries < 60:
-            print(f"  Waiting for clock {clock.id} to finish advancing... ({retries * 5}s)")
-            time.sleep(5)
-            clock = stripe.test_helpers.TestClock.retrieve(clock.id)
-            retries += 1
 
+    # Collect all clock IDs first
+    clock_ids = [c.id for c in stripe.test_helpers.TestClock.list(limit=100).auto_paging_iter()]
+    if not clock_ids:
+        print("  No test clocks to delete.\n")
+        return
+
+    print(f"  Found {len(clock_ids)} test clocks.")
+
+    # Wait for any advancing clocks (batch poll)
+    wait_for_all_clocks(clock_ids, label="pre-delete")
+
+    # Delete in parallel
+    def _delete_clock(clock_id):
         try:
-            print(f"  Deleting clock {clock.id} ({clock.name})")
-            stripe.test_helpers.TestClock.delete(clock.id)
-            sleep()
-            count += 1
+            stripe.test_helpers.TestClock.delete(clock_id)
+            return clock_id, True
         except stripe._error.RateLimitError:
-            print(f"  Could not delete clock {clock.id} (still advancing), skipping.")
+            return clock_id, False
 
-    if count == 0:
-        print("  No test clocks deleted.")
-    else:
-        print(f"  Deleted {count} test clocks.")
-    print()
+    deleted = 0
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {pool.submit(_delete_clock, cid): cid for cid in clock_ids}
+        for future in as_completed(futures):
+            cid, ok = future.result()
+            if ok:
+                deleted += 1
+
+    print(f"  Deleted {deleted}/{len(clock_ids)} test clocks.\n")
 
 
 def months_ago_timestamp(n_months):
@@ -148,22 +156,44 @@ def advance_timestamp(base_ts, months_forward):
     return int(target.timestamp())
 
 
-def wait_for_clock(clock_id, max_wait=300):
-    """Poll test clock until status is 'ready', with timeout."""
+def wait_for_all_clocks(clock_ids, max_wait=300, label=""):
+    """Poll all clocks concurrently until every one is 'ready' or failed/timed-out.
+
+    Instead of waiting for clock 1, then clock 2, etc., this checks all of
+    them in a single batch per iteration. Clocks that finish early are removed
+    from the poll set immediately, so the total wait is ~max(individual waits)
+    rather than sum(individual waits).
+    """
+    pending = set(clock_ids)
     start = time.time()
-    while True:
-        clock = stripe.test_helpers.TestClock.retrieve(clock_id)
-        if clock.status == "ready":
-            return clock
-        if clock.status == "internal_failure":
-            print(f"  ERROR: Clock {clock_id} failed internally.")
-            return clock
+
+    while pending:
         elapsed = time.time() - start
         if elapsed > max_wait:
-            print(f"  TIMEOUT: Clock {clock_id} still {clock.status} after {max_wait}s, skipping.")
-            return clock
-        print(f"    Clock {clock_id} status={clock.status}, waiting... ({int(elapsed)}s)")
-        time.sleep(5)
+            print(f"  TIMEOUT: {len(pending)} clocks still not ready after {max_wait}s{f' ({label})' if label else ''}")
+            break
+
+        # Poll all pending clocks in parallel
+        def _check(cid):
+            return cid, stripe.test_helpers.TestClock.retrieve(cid)
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            results = list(pool.map(_check, list(pending)))
+
+        newly_done = []
+        for cid, clock in results:
+            if clock.status == "ready":
+                newly_done.append(cid)
+            elif clock.status == "internal_failure":
+                print(f"  ERROR: Clock {cid} failed internally.")
+                newly_done.append(cid)
+
+        for cid in newly_done:
+            pending.discard(cid)
+
+        if pending:
+            print(f"    {len(pending)} clocks still processing... ({int(elapsed)}s)")
+            time.sleep(5)
 
 
 def get_month_label(base_ts, months_forward):
@@ -463,15 +493,19 @@ def main():
 
         print(f"\n=== Phase {phase_num + 2}: Month {advance_months} ({month_label}) ===\n")
 
-        # Advance all clocks
-        print(f"Advancing to {datetime.fromtimestamp(advance_to, tz=timezone.utc).isoformat()}")
-        for clock_id in clocks:
-            stripe.test_helpers.TestClock.advance(clock_id, frozen_time=advance_to)
-            sleep()
+        # Advance all clocks in parallel
+        print(f"Advancing {len(clocks)} clocks to {datetime.fromtimestamp(advance_to, tz=timezone.utc).isoformat()}")
 
+        def _advance(cid):
+            stripe.test_helpers.TestClock.advance(cid, frozen_time=advance_to)
+            return cid
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            list(pool.map(_advance, clocks))
+
+        # Wait for all clocks to finish processing (batch poll)
         print("Waiting for all clocks to process...")
-        for clock_id in clocks:
-            wait_for_clock(clock_id)
+        wait_for_all_clocks(clocks, label=f"month {advance_months}")
         print("All clocks ready.\n")
 
         # Apply upgrades
