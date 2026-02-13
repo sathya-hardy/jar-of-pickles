@@ -398,11 +398,18 @@ def apply_past_due(customer_info):
     Stripe will automatically set the subscription status to 'past_due'
     when the next billing attempt uses this card and the charge is declined.
     """
-    # Attach a test card that always declines
-    pm = stripe.PaymentMethod.attach(
-        "pm_card_chargeDeclined",
-        customer=customer_info["customer_id"],
+    # Create a test card that attaches OK but always declines on charge.
+    # Card 4000_0000_0000_0341 is Stripe's "attach succeeds, charge fails" test card.
+    pm = stripe.PaymentMethod.create(
+        type="card",
+        card={
+            "number": "4000000000000341",
+            "exp_month": 12,
+            "exp_year": 2030,
+            "cvc": "123",
+        },
     )
+    stripe.PaymentMethod.attach(pm.id, customer=customer_info["customer_id"])
     sleep()
     # Set the declining card as the default so the next auto-charge uses it
     stripe.Customer.modify(
