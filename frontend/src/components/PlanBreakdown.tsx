@@ -24,19 +24,19 @@ interface PlanBreakdownProps {
 }
 
 const PLAN_COLORS_LIGHT: Record<string, string> = {
-  'Free': '#9ca3af',
-  'Standard': '#f59e0b',
-  'Pro Plus': '#ef4444',
-  'Engage': '#d946ef',
-  'Enterprise': '#1e293b',
+  'Free': '#808e71',       // dusty-olive 500
+  'Standard': '#4e76b1',   // yale-blue 500
+  'Pro Plus': '#a92523',    // dark-wine 600
+  'Engage': '#c76605',      // sandy-brown 600
+  'Enterprise': '#2ba15a',  // celadon 600
 }
 
 const PLAN_COLORS_DARK: Record<string, string> = {
-  'Free': '#9ca3af',
-  'Standard': '#fbbf24',
-  'Pro Plus': '#f87171',
-  'Engage': '#e879f9',
-  'Enterprise': '#e2e8f0',
+  'Free': '#b3bbaa',       // dusty-olive 300
+  'Standard': '#95add0',   // yale-blue 300
+  'Pro Plus': '#e58280',    // dark-wine 300
+  'Engage': '#fbb36a',      // sandy-brown 300
+  'Enterprise': '#5ed48d',  // celadon 400
 }
 
 const PLAN_ORDER = ['Free', 'Standard', 'Pro Plus', 'Engage', 'Enterprise']
