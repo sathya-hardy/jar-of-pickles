@@ -4,7 +4,8 @@ generate_data.py — Create 100 test customers with Stripe test clocks.
 Simulates 6 months of billing history for a digital signage SaaS with:
 - 5 pricing tiers (Free, Standard, Pro Plus, Engage, Enterprise)
 - Per-screen subscriptions with varying screen counts
-- Lifecycle events spread across 6 monthly phases
+- Lifecycle events spread across 6 monthly phases (upgrades, downgrades,
+  cancellations, and past_due via declining payment methods)
 
 Test clock strategy:
 - 34 test clocks (3 customers per clock, last clock has 1)
@@ -77,14 +78,14 @@ CUSTOMER_PLANS = (
 TIER_ORDER = ["free", "standard", "pro_plus", "engage", "enterprise"]
 
 # Lifecycle events spread across 6 monthly phases
-# Total: 15 upgrades, 2 downgrades, 8 cancellations
+# Total: 15 upgrades, 2 downgrades, 8 cancellations, 5 past_due
 LIFECYCLE_PHASES = [
-    {"upgrades": 2, "downgrades": 0, "cancellations": 1},
-    {"upgrades": 3, "downgrades": 1, "cancellations": 1},
-    {"upgrades": 2, "downgrades": 0, "cancellations": 2},
-    {"upgrades": 3, "downgrades": 1, "cancellations": 1},
-    {"upgrades": 3, "downgrades": 0, "cancellations": 2},
-    {"upgrades": 2, "downgrades": 0, "cancellations": 1},
+    {"upgrades": 2, "downgrades": 0, "cancellations": 1, "past_dues": 1},
+    {"upgrades": 3, "downgrades": 1, "cancellations": 1, "past_dues": 1},
+    {"upgrades": 2, "downgrades": 0, "cancellations": 2, "past_dues": 1},
+    {"upgrades": 3, "downgrades": 1, "cancellations": 1, "past_dues": 0},
+    {"upgrades": 3, "downgrades": 0, "cancellations": 2, "past_dues": 1},
+    {"upgrades": 2, "downgrades": 0, "cancellations": 1, "past_dues": 1},
 ]
 
 RATE_LIMIT_SLEEP = 0.25  # seconds between API calls
@@ -211,6 +212,7 @@ def create_customer_with_sub(clock_id, customer_index, plan):
         "index": customer_index,
         "clock_id": clock_id,
         "cancelled": False,
+        "past_due": False,
     }
 
 
@@ -250,6 +252,18 @@ def select_cancel_candidates(customers, count):
     random.shuffle(eligible_other)
     candidates = eligible_priority + eligible_other
     return candidates[:count]
+
+
+def select_past_due_candidates(customers, count):
+    """Select paying, active, non-past-due customers to mark as past_due."""
+    eligible = [
+        c for c in customers
+        if not c["cancelled"]
+        and not c.get("past_due")
+        and c["plan"] != "free"  # free tier has no charge to fail
+    ]
+    random.shuffle(eligible)
+    return eligible[:count]
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +362,28 @@ def apply_cancellation(customer_info):
     customer_info["cancelled"] = True
 
 
+def apply_past_due(customer_info):
+    """Switch customer to a declining card so the next invoice charge fails.
+
+    Stripe will automatically set the subscription status to 'past_due'
+    when the next billing attempt uses this card and the charge is declined.
+    """
+    # Attach a test card that always declines
+    pm = stripe.PaymentMethod.attach(
+        "pm_card_chargeDeclined",
+        customer=customer_info["customer_id"],
+    )
+    sleep()
+    # Set the declining card as the default so the next auto-charge uses it
+    stripe.Customer.modify(
+        customer_info["customer_id"],
+        invoice_settings={"default_payment_method": pm.id},
+    )
+    sleep()
+    print(f"    Past Due #{customer_info['index']:03d} ({customer_info['plan']})")
+    customer_info["past_due"] = True
+
+
 # ---------------------------------------------------------------------------
 # Snapshot helper
 # ---------------------------------------------------------------------------
@@ -358,6 +394,7 @@ def take_snapshot(all_customers, month_label):
     snapshot = []
     for c in all_customers:
         if not c["cancelled"]:
+            status = "past_due" if c.get("past_due") else "active"
             snapshot.append({
                 "month": month_label,
                 "customer_id": c["customer_id"],
@@ -367,6 +404,7 @@ def take_snapshot(all_customers, month_label):
                 "price_amount": PRICE_AMOUNTS[c["plan"]],
                 "screens": c["screens"],
                 "mrr_cents": PRICE_AMOUNTS[c["plan"]] * c["screens"],
+                "status": status,
             })
     return snapshot
 
@@ -457,6 +495,13 @@ def main():
             for c in candidates:
                 apply_cancellation(c)
 
+        # Apply past_due triggers (swap to declining card before next advance)
+        if phase.get("past_dues", 0) > 0:
+            candidates = select_past_due_candidates(all_customers, phase["past_dues"])
+            print(f"\nApplying {len(candidates)} past_due triggers:")
+            for c in candidates:
+                apply_past_due(c)
+
         # Snapshot after changes
         all_snapshots.extend(take_snapshot(all_customers, month_label))
         active_count = len([c for c in all_customers if not c["cancelled"]])
@@ -484,8 +529,10 @@ def main():
     print("\n=== Summary ===\n")
     active = [c for c in all_customers if not c["cancelled"]]
     cancelled = [c for c in all_customers if c["cancelled"]]
+    past_due = [c for c in all_customers if c.get("past_due") and not c["cancelled"]]
     print(f"Total customers created: {len(all_customers)}")
     print(f"Active subscriptions:    {len(active)}")
+    print(f"Past due:                {len(past_due)}")
     print(f"Cancelled:               {len(cancelled)}")
     print(f"Test clocks used:        {len(clocks)}")
 

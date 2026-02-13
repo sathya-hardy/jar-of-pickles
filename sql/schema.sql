@@ -26,6 +26,7 @@
 -- price_amount   INTEGER   -- cents per screen per month (e.g., 1500 = $15)
 -- screens        INTEGER   -- number of screens
 -- mrr_cents      INTEGER   -- price_amount × screens (e.g., 18000 = $180)
+-- status         STRING    -- "active" or "past_due"
 
 
 -- -----------------------------------------------------------------------------
@@ -80,6 +81,8 @@
 -- paying_customers      INTEGER  -- distinct customers with mrr_cents > 0
 -- total_customers       INTEGER  -- all active customers including Free tier
 -- active_subscriptions  INTEGER  -- distinct subscriptions
+-- past_due_customers    INTEGER  -- distinct customers with status = 'past_due'
+-- at_risk_mrr           FLOAT    -- MRR from past_due customers in dollars
 
 
 -- -----------------------------------------------------------------------------

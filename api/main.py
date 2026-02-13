@@ -59,7 +59,9 @@ def get_mrr():
             mrr_amount,
             paying_customers,
             total_customers,
-            active_subscriptions
+            active_subscriptions,
+            past_due_customers,
+            at_risk_mrr
         FROM `{PROJECT_ID}.{DATASET}.mrr_monthly`
         ORDER BY month ASC
     """)

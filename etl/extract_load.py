@@ -4,7 +4,7 @@ extract_load.py — Batch ETL pipeline: Stripe -> BigQuery.
 Extracts subscription snapshots (from generate_data.py) and loads them
 into BigQuery. MRR views are built from these snapshots, which accurately
 reflect the state of each subscription at each month (including upgrades,
-downgrades, and cancellations at the exact time they happened).
+downgrades, cancellations, and past_due status at the exact time they happened).
 
 Run: uv run python etl/extract_load.py
 """
@@ -91,7 +91,9 @@ def create_views():
       ROUND(SUM(mrr_cents) / 100.0, 2) AS mrr_amount,
       COUNT(DISTINCT CASE WHEN mrr_cents > 0 THEN customer_id END) AS paying_customers,
       COUNT(DISTINCT customer_id) AS total_customers,
-      COUNT(DISTINCT subscription_id) AS active_subscriptions
+      COUNT(DISTINCT subscription_id) AS active_subscriptions,
+      COUNT(DISTINCT CASE WHEN status = 'past_due' THEN customer_id END) AS past_due_customers,
+      ROUND(SUM(CASE WHEN status = 'past_due' THEN mrr_cents ELSE 0 END) / 100.0, 2) AS at_risk_mrr
     FROM `{PROJECT_ID}.{DATASET}.sub_snapshots`
     GROUP BY month
     ORDER BY month ASC
@@ -192,6 +194,7 @@ def main():
         bigquery.SchemaField("price_amount", "INTEGER"),
         bigquery.SchemaField("screens", "INTEGER"),
         bigquery.SchemaField("mrr_cents", "INTEGER"),
+        bigquery.SchemaField("status", "STRING"),
     ])
 
     print()
