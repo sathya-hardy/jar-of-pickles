@@ -459,25 +459,44 @@ def main():
     print(f"Creating {len(CUSTOMER_PLANS)} customers across {len(batches)} test clocks...\n")
     print(f"Frozen time: {datetime.fromtimestamp(frozen_time, tz=timezone.utc).isoformat()}\n")
 
-    # --- Phase 1: Create all clocks, customers, and subscriptions ---
+    # --- Phase 1: Create all clocks, customers, and subscriptions (parallel) ---
     print("=== Phase 1: Creating test clocks, customers, and subscriptions ===\n")
 
-    customer_index = 1
-    for batch_num, batch in enumerate(batches):
+    # Pre-assign customer indices per batch so threads don't share mutable state
+    batch_start_indices = []
+    idx = 1
+    for batch in batches:
+        batch_start_indices.append(idx)
+        idx += len(batch)
+
+    def _create_batch(args):
+        batch_num, batch, start_idx = args
         clock = stripe.test_helpers.TestClock.create(
             frozen_time=frozen_time,
             name=f"MRR Clock {batch_num + 1:02d}",
         )
-        sleep()
-        clocks.append(clock.id)
-
-        print(f"Clock {batch_num + 1}/{len(batches)} ({clock.id}):")
-
+        customers = []
+        ci = start_idx
         for plan in batch:
-            info = create_customer_with_sub(clock.id, customer_index, plan)
-            all_customers.append(info)
-            print(f"  Customer #{customer_index:03d}: {plan}, {info['screens']} screens")
-            customer_index += 1
+            info = create_customer_with_sub(clock.id, ci, plan)
+            customers.append(info)
+            ci += 1
+        return batch_num, clock.id, customers
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        results = list(pool.map(
+            _create_batch,
+            [(i, b, si) for i, (b, si) in enumerate(zip(batches, batch_start_indices))],
+        ))
+
+    # Sort by batch number to maintain deterministic ordering
+    results.sort(key=lambda r: r[0])
+    for batch_num, clock_id, customers in results:
+        clocks.append(clock_id)
+        all_customers.extend(customers)
+        print(f"Clock {batch_num + 1}/{len(batches)} ({clock_id}): {len(customers)} customers")
+
+    print(f"\nCreated {len(all_customers)} customers across {len(clocks)} clocks.")
 
     # Snapshot month 0 (creation month)
     month_0 = get_month_label(frozen_time, 0)
