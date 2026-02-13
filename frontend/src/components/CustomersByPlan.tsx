@@ -30,19 +30,19 @@ interface CustomersByPlanProps {
 }
 
 const PLAN_COLORS_LIGHT: Record<string, string> = {
-  'Free': '#94a3b8',
-  'Standard': '#60a5fa',
-  'Pro Plus': '#4f46e5',
-  'Engage': '#f472b6',
-  'Enterprise': '#0f172a',
+  'Free': '#9ca3af',
+  'Standard': '#0ea5e9',
+  'Pro Plus': '#6366f1',
+  'Engage': '#06b6d4',
+  'Enterprise': '#1e293b',
 }
 
 const PLAN_COLORS_DARK: Record<string, string> = {
-  'Free': '#94a3b8',
-  'Standard': '#60a5fa',
+  'Free': '#9ca3af',
+  'Standard': '#38bdf8',
   'Pro Plus': '#818cf8',
-  'Engage': '#f472b6',
-  'Enterprise': '#e2e8f0',
+  'Engage': '#22d3ee',
+  'Enterprise': '#cbd5e1',
 }
 
 const PLAN_ORDER = ['Free', 'Standard', 'Pro Plus', 'Engage', 'Enterprise']

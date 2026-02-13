@@ -61,7 +61,7 @@ export function SummaryCards() {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-6 gap-3 h-full">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 lg:gap-3 h-full">
         {[...Array(6)].map((_, i) => (
           <div key={i} className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 animate-pulse transition-colors duration-200">
             <div className="h-3 bg-gray-200 dark:bg-slate-600 rounded w-20 mb-3"></div>
@@ -97,8 +97,8 @@ export function SummaryCards() {
       label: 'Current MRR',
       value: latest ? formatDollar(latest.mrr_amount) : '\u2014',
       icon: DollarSign,
-      iconColor: 'text-indigo-600 dark:text-indigo-400',
-      iconBg: 'bg-indigo-50 dark:bg-indigo-900/30',
+      iconColor: 'text-green-700 dark:text-green-400',
+      iconBg: 'bg-green-50 dark:bg-green-900/30',
     },
     {
       label: 'MoM Growth',
@@ -122,22 +122,22 @@ export function SummaryCards() {
       label: 'Paying Customers',
       value: latest ? latest.paying_customers.toString() : '\u2014',
       icon: Users,
-      iconColor: 'text-sky-600 dark:text-sky-400',
-      iconBg: 'bg-sky-50 dark:bg-sky-900/30',
+      iconColor: 'text-green-700 dark:text-green-400',
+      iconBg: 'bg-green-50 dark:bg-green-900/30',
     },
     {
       label: 'Total Customers',
       value: latest ? latest.total_customers.toString() : '\u2014',
       icon: UsersRound,
-      iconColor: 'text-violet-600 dark:text-violet-400',
-      iconBg: 'bg-violet-50 dark:bg-violet-900/30',
+      iconColor: 'text-green-800 dark:text-green-300',
+      iconBg: 'bg-green-50 dark:bg-green-900/30',
     },
     {
       label: 'ARPPU',
       value: latestArpu ? formatDollarDecimal(latestArpu.arppu) : '\u2014',
       icon: BarChart3,
-      iconColor: 'text-teal-600 dark:text-teal-400',
-      iconBg: 'bg-teal-50 dark:bg-teal-900/30',
+      iconColor: 'text-green-600 dark:text-green-400',
+      iconBg: 'bg-green-50 dark:bg-green-900/30',
     },
     {
       label: 'Churn Rate',
@@ -158,7 +158,7 @@ export function SummaryCards() {
   ]
 
   return (
-    <div className="grid grid-cols-6 gap-3 h-full">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 lg:gap-3 h-full">
       {cards.map((card) => {
         const Icon = card.icon
         return (

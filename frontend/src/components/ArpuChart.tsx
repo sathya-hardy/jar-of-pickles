@@ -39,7 +39,7 @@ export function ArpuChart({ isDarkMode }: ArpuChartProps) {
       })
   }, [])
 
-  const strokeColor = isDarkMode ? '#2dd4bf' : '#0d9488'
+  const strokeColor = isDarkMode ? '#86efac' : '#166534'
   const gridColor = isDarkMode ? '#334155' : '#e5e7eb'
   const textColor = isDarkMode ? '#94a3b8' : '#6b7280'
 

@@ -41,7 +41,7 @@ export function CustomerChart({ isDarkMode }: CustomerChartProps) {
       })
   }, [])
 
-  const customerColor = isDarkMode ? '#38bdf8' : '#0284c7'
+  const customerColor = isDarkMode ? '#6ee7b7' : '#065f46'
   const totalColor = isDarkMode ? '#94a3b8' : '#94a3b8'
   const gridColor = isDarkMode ? '#334155' : '#e5e7eb'
   const textColor = isDarkMode ? '#94a3b8' : '#6b7280'

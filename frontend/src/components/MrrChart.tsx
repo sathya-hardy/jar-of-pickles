@@ -45,7 +45,7 @@ export function MrrChart({ isDarkMode }: MrrChartProps) {
       })
   }, [])
 
-  const strokeColor = isDarkMode ? '#818cf8' : '#4f46e5'
+  const strokeColor = isDarkMode ? '#4ade80' : '#15803d'
   const gridColor = isDarkMode ? '#334155' : '#e5e7eb'
   const textColor = isDarkMode ? '#94a3b8' : '#6b7280'
 
