@@ -53,7 +53,7 @@ Stripe Test Mode → generate_data.py (test clocks + snapshots)
 - **15 upgrades** — plan tier changes or screen count increases
 - **2 downgrades** — plan tier decreases
 - **8 cancellations** — weighted toward Free/Standard tiers
-- **5 past due** — payment method switched to Stripe test card `4000 0000 0000 0341` (attaches successfully but declines on charge), causing Stripe to set the subscription to `past_due` on the next billing cycle
+- **5 past due** — default payment method detached so the next billing cycle charge fails, causing Stripe to set the subscription to `past_due`
 
 Changes are spread across all 6 months (1 advance per month) for realistic, gradual MRR growth.
 
