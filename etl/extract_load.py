@@ -6,54 +6,22 @@ into BigQuery. MRR views are built from these snapshots, which accurately
 reflect the state of each subscription at each month (including upgrades,
 downgrades, and cancellations at the exact time they happened).
 
-Also extracts raw invoices and subscriptions from Stripe for reference.
-
 Run: uv run python etl/extract_load.py
 """
 
 import json
 import os
-from datetime import datetime, timezone
 from pathlib import Path
-import stripe
 import pandas as pd
 from google.cloud import bigquery
 from dotenv import load_dotenv
 
 load_dotenv()
 
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 PROJECT_ID = os.getenv("GCP_PROJECT_ID")
 DATASET = os.getenv("BQ_DATASET", "stripe_mrr")
 
 bq_client = bigquery.Client(project=PROJECT_ID)
-
-# Load price-to-plan mapping from config
-CONFIG_FILE = Path(__file__).resolve().parent.parent / "config" / "stripe_prices.json"
-
-if not CONFIG_FILE.exists():
-    print(f"ERROR: {CONFIG_FILE} not found.")
-    print("Run seed_prices.py first:  uv run python scripts/seed_prices.py")
-    exit(1)
-
-with open(CONFIG_FILE) as f:
-    _config = json.load(f)
-
-PRICE_TO_PLAN = _config["price_to_plan"]
-
-# Load current run metadata for filtering
-RUN_FILE = Path(__file__).resolve().parent.parent / "config" / "current_run.json"
-
-if not RUN_FILE.exists():
-    print(f"ERROR: {RUN_FILE} not found.")
-    print("Run generate_data.py first:  uv run python scripts/generate_data.py")
-    exit(1)
-
-with open(RUN_FILE) as f:
-    _run = json.load(f)
-
-VALID_CUSTOMER_IDS = set(_run["customer_ids"])
-print(f"Filtering to {len(VALID_CUSTOMER_IDS)} customers from current run.")
 
 # Load subscription snapshots
 SNAPSHOTS_FILE = Path(__file__).resolve().parent.parent / "config" / "sub_snapshots.json"
@@ -80,84 +48,6 @@ def ensure_dataset():
         dataset.location = "US"
         bq_client.create_dataset(dataset)
         print(f"Created dataset {DATASET}.")
-
-
-def extract_invoices():
-    """Extract all invoices from Stripe (for reference)."""
-    print("Extracting invoices from Stripe...")
-    rows = []
-    invoices = stripe.Invoice.search(
-        query="status:'paid' OR status:'open' OR status:'void' OR status:'uncollectible'",
-        limit=100,
-    )
-
-    for inv in invoices.auto_paging_iter():
-        if inv.customer not in VALID_CUSTOMER_IDS:
-            continue
-
-        price_id = None
-        lines = stripe.Invoice.list_lines(inv.id, limit=1)
-        if lines.data:
-            first_line = lines.data[0]
-            pricing = getattr(first_line, "pricing", None)
-            if pricing and pricing.get("price_details"):
-                price_id = pricing["price_details"].get("price")
-
-        subscription_id = None
-        parent = getattr(inv, "parent", None)
-        if parent and parent.get("subscription_details"):
-            subscription_id = parent["subscription_details"].get("subscription")
-
-        rows.append({
-            "invoice_id": inv.id,
-            "customer_id": inv.customer,
-            "subscription_id": subscription_id,
-            "status": inv.status,
-            "amount_paid": inv.amount_paid,
-            "currency": inv.currency,
-            "price_id": price_id,
-            "period_start": datetime.fromtimestamp(inv.period_start, tz=timezone.utc) if inv.period_start else None,
-            "period_end": datetime.fromtimestamp(inv.period_end, tz=timezone.utc) if inv.period_end else None,
-            "created": datetime.fromtimestamp(inv.created, tz=timezone.utc),
-        })
-
-    print(f"Extracted {len(rows)} invoices.")
-    return rows
-
-
-def extract_subscriptions():
-    """Extract all subscriptions from Stripe (for reference)."""
-    print("Extracting subscriptions from Stripe...")
-    rows = []
-    subs = stripe.Subscription.search(
-        query="status:'active' OR status:'canceled' OR status:'past_due' OR status:'incomplete'",
-        limit=100,
-    )
-
-    for sub in subs.auto_paging_iter():
-        if sub.customer not in VALID_CUSTOMER_IDS:
-            continue
-
-        item = sub["items"]["data"][0]
-        rows.append({
-            "subscription_id": sub.id,
-            "customer_id": sub.customer,
-            "status": sub.status,
-            "price_id": item.price.id,
-            "price_amount": item.price.unit_amount,
-            "price_interval": item.price.recurring.interval if item.price.recurring else None,
-            "quantity": item.quantity,
-            "current_period_start": datetime.fromtimestamp(item.current_period_start, tz=timezone.utc),
-            "current_period_end": datetime.fromtimestamp(item.current_period_end, tz=timezone.utc),
-            "created": datetime.fromtimestamp(sub.created, tz=timezone.utc),
-            "canceled_at": (
-                datetime.fromtimestamp(sub.canceled_at, tz=timezone.utc)
-                if sub.canceled_at else None
-            ),
-        })
-
-    print(f"Extracted {len(rows)} subscriptions.")
-    return rows
 
 
 def load_to_bigquery(rows, table_name, schema):
@@ -290,42 +180,6 @@ def main():
 
     ensure_dataset()
     print()
-
-    # Extract from Stripe (for reference tables)
-    invoice_rows = extract_invoices()
-    subscription_rows = extract_subscriptions()
-    print()
-
-    # Load invoices
-    print("Loading invoices into BigQuery...")
-    load_to_bigquery(invoice_rows, "raw_invoices", [
-        bigquery.SchemaField("invoice_id", "STRING"),
-        bigquery.SchemaField("customer_id", "STRING"),
-        bigquery.SchemaField("subscription_id", "STRING"),
-        bigquery.SchemaField("status", "STRING"),
-        bigquery.SchemaField("amount_paid", "INTEGER"),
-        bigquery.SchemaField("currency", "STRING"),
-        bigquery.SchemaField("price_id", "STRING"),
-        bigquery.SchemaField("period_start", "TIMESTAMP"),
-        bigquery.SchemaField("period_end", "TIMESTAMP"),
-        bigquery.SchemaField("created", "TIMESTAMP"),
-    ])
-
-    # Load subscriptions
-    print("Loading subscriptions into BigQuery...")
-    load_to_bigquery(subscription_rows, "raw_subscriptions", [
-        bigquery.SchemaField("subscription_id", "STRING"),
-        bigquery.SchemaField("customer_id", "STRING"),
-        bigquery.SchemaField("status", "STRING"),
-        bigquery.SchemaField("price_id", "STRING"),
-        bigquery.SchemaField("price_amount", "INTEGER"),
-        bigquery.SchemaField("price_interval", "STRING"),
-        bigquery.SchemaField("quantity", "INTEGER"),
-        bigquery.SchemaField("current_period_start", "TIMESTAMP"),
-        bigquery.SchemaField("current_period_end", "TIMESTAMP"),
-        bigquery.SchemaField("created", "TIMESTAMP"),
-        bigquery.SchemaField("canceled_at", "TIMESTAMP"),
-    ])
 
     # Load subscription snapshots
     print("Loading subscription snapshots into BigQuery...")
