@@ -2,6 +2,14 @@
 
 A complete pipeline for generating, extracting, transforming, and visualizing Monthly Recurring Revenue (MRR) data for a digital signage SaaS company.
 
+## Screenshots
+
+### Dark Mode
+![Dashboard — Dark Mode](docs/screenshots/dashboard-dark.png)
+
+### Light Mode
+![Dashboard — Light Mode](docs/screenshots/dashboard-light.png)
+
 ## Architecture
 
 ```
