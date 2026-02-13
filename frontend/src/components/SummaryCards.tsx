@@ -61,7 +61,7 @@ export function SummaryCards() {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-6 gap-3 h-full">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 lg:gap-3 h-full">
         {[...Array(6)].map((_, i) => (
           <div key={i} className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-4 animate-pulse transition-colors duration-200">
             <div className="h-3 bg-gray-200 dark:bg-slate-600 rounded w-20 mb-3"></div>
@@ -158,7 +158,7 @@ export function SummaryCards() {
   ]
 
   return (
-    <div className="grid grid-cols-6 gap-3 h-full">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 lg:gap-3 h-full">
       {cards.map((card) => {
         const Icon = card.icon
         return (
