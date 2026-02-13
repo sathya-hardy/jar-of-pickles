@@ -14,12 +14,12 @@ A complete pipeline for generating, extracting, transforming, and visualizing Mo
 
 ```mermaid
 flowchart TD
-    A[Stripe Test Mode] --> B[generate_data.py\ntest clocks + snapshots]
-    B --> C[config/sub_snapshots.json\n+ config/current_run.json]
-    C --> D[extract_load.py\nsnapshots → BigQuery]
-    D --> E[BigQuery Views\nMRR · ARPPU · Churn · Plan Breakdowns]
-    E --> F[FastAPI\nport 8888]
-    F --> G[React Dashboard\nport 5173]
+    A[Stripe Test Mode] --> B[generate_data.py<br>test clocks + snapshots]
+    B --> C[config/sub_snapshots.json<br>+ config/current_run.json]
+    C --> D[extract_load.py<br>snapshots → BigQuery]
+    D --> E[BigQuery Views<br>MRR · ARPPU · Churn · Plan Breakdowns]
+    E --> F[FastAPI<br>port 8888]
+    F --> G[React Dashboard<br>port 5173]
 ```
 
 ## Pipeline Steps
