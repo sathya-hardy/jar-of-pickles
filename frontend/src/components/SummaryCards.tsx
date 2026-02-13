@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { DollarSign, TrendingUp, Users, UsersRound, BarChart3, UserMinus } from 'lucide-react'
 
 interface MrrDataPoint {
@@ -24,6 +24,34 @@ const formatDollar = (value: number) =>
 
 const formatDollarDecimal = (value: number) =>
   `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+function CardWithTooltip({ tooltip, children }: { tooltip: string; children: React.ReactNode }) {
+  const [show, setShow] = useState(false)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>(null)
+
+  const handleEnter = () => {
+    timeoutRef.current = setTimeout(() => setShow(true), 400)
+  }
+  const handleLeave = () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    setShow(false)
+  }
+
+  return (
+    <div
+      className="relative bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-3 flex items-center gap-2.5 transition-colors duration-200 cursor-default"
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+    >
+      {children}
+      {show && (
+        <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 z-50 w-56 px-3 py-2 rounded-lg text-xs leading-relaxed shadow-lg border bg-white dark:bg-slate-700 text-gray-700 dark:text-slate-200 border-gray-200 dark:border-slate-600 pointer-events-none">
+          {tooltip}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function SummaryCards() {
   const [mrrData, setMrrData] = useState<MrrDataPoint[]>([])
@@ -95,6 +123,7 @@ export function SummaryCards() {
   const cards = [
     {
       label: 'Current MRR',
+      tooltip: 'Monthly Recurring Revenue — the total predictable revenue from all active subscriptions this month.',
       value: latest ? formatDollar(latest.mrr_amount) : '\u2014',
       icon: DollarSign,
       iconColor: 'text-green-700 dark:text-green-400',
@@ -102,6 +131,7 @@ export function SummaryCards() {
     },
     {
       label: 'MoM Growth',
+      tooltip: 'Month-over-Month Growth — the percentage change in MRR compared to the previous month.',
       value: momGrowth !== null
         ? `${momGrowth >= 0 ? '+' : ''}${momGrowth.toFixed(1)}%`
         : '\u2014',
@@ -120,6 +150,7 @@ export function SummaryCards() {
     },
     {
       label: 'Paying Customers',
+      tooltip: 'The number of customers currently on a paid subscription plan.',
       value: latest ? latest.paying_customers.toString() : '\u2014',
       icon: Users,
       iconColor: 'text-green-700 dark:text-green-400',
@@ -127,6 +158,7 @@ export function SummaryCards() {
     },
     {
       label: 'Total Customers',
+      tooltip: 'The total number of all customers, including those on the free tier.',
       value: latest ? latest.total_customers.toString() : '\u2014',
       icon: UsersRound,
       iconColor: 'text-green-800 dark:text-green-300',
@@ -134,6 +166,7 @@ export function SummaryCards() {
     },
     {
       label: 'ARPPU',
+      tooltip: 'Average Revenue Per Paying User — the average monthly revenue generated per paying customer.',
       value: latestArpu ? formatDollarDecimal(latestArpu.arppu) : '\u2014',
       icon: BarChart3,
       iconColor: 'text-green-600 dark:text-green-400',
@@ -141,6 +174,7 @@ export function SummaryCards() {
     },
     {
       label: 'Churn Rate',
+      tooltip: 'The percentage of paying customers who cancelled their subscription this month.',
       value: churnRate !== null ? `${churnRate.toFixed(1)}%` : '\u2014',
       icon: UserMinus,
       iconColor: churnRate !== null && churnRate > 0
@@ -162,10 +196,7 @@ export function SummaryCards() {
       {cards.map((card) => {
         const Icon = card.icon
         return (
-          <div
-            key={card.label}
-            className="bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 p-3 flex items-center gap-2.5 transition-colors duration-200"
-          >
+          <CardWithTooltip key={card.label} tooltip={card.tooltip}>
             <div className={`p-1.5 rounded-lg ${card.iconBg} transition-colors duration-200`}>
               <Icon className={`w-4 h-4 ${card.iconColor}`} />
             </div>
@@ -175,7 +206,7 @@ export function SummaryCards() {
                 {card.value}
               </p>
             </div>
-          </div>
+          </CardWithTooltip>
         )
       })}
     </div>
