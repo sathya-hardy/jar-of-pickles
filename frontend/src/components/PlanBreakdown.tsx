@@ -33,10 +33,10 @@ const PLAN_COLORS_LIGHT: Record<string, string> = {
 
 const PLAN_COLORS_DARK: Record<string, string> = {
   'Free': '#ccd2c6',       // dusty-olive 200
-  'Standard': '#b8c8e0',   // yale-blue 200
-  'Pro Plus': '#eeabaa',    // dark-wine 200
-  'Engage': '#fccc9c',      // sandy-brown 200
-  'Enterprise': '#86dfaa',  // celadon 300
+  'Standard': '#7191c1',   // yale-blue 400
+  'Pro Plus': '#dc5856',    // dark-wine 400
+  'Engage': '#fa9938',      // sandy-brown 400
+  'Enterprise': '#5ed48d',  // celadon 400
 }
 
 const PLAN_ORDER = ['Free', 'Standard', 'Pro Plus', 'Engage', 'Enterprise']
