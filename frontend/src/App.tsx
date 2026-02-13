@@ -16,7 +16,7 @@ function App() {
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-3 border-b border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 transition-colors duration-200">
           <div className="flex items-center gap-3">
-            <LayoutDashboard className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+            <LayoutDashboard className="w-6 h-6 text-green-700 dark:text-green-400" />
             <div>
               <h1 className="text-lg font-bold text-gray-900 dark:text-white leading-tight">
                 MRR Dashboard
