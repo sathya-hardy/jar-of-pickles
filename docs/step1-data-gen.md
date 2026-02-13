@@ -87,6 +87,30 @@ After each monthly advance and lifecycle event batch, the script captures the ex
 2. [Stripe Dashboard → Test Clocks](https://dashboard.stripe.com/test/test-clocks) — should see 34 clocks
 3. [Stripe Dashboard → Invoices](https://dashboard.stripe.com/test/invoices) — should see invoices spanning 6 months
 
+## Stripe Test Cards
+
+The script uses two Stripe test payment methods:
+
+| Card | Where | Purpose |
+|------|-------|---------|
+| `pm_card_visa` | Customer creation | Default payment method — always succeeds |
+| `4000 0000 0000 0341` | Past-due simulation | Attaches to a customer successfully, but **declines on charge**. When set as the default payment method, the next billing cycle charge fails and Stripe moves the subscription to `past_due`. |
+
+**Why not `pm_card_chargeDeclined`?** That token declines at _attach_ time (throws `CardError` during `PaymentMethod.attach`), so it can never be set as the customer's default. Card `4000000000000341` is Stripe's dedicated "attach succeeds, charge fails" test card.
+
+## Performance (Parallel Execution)
+
+The script uses `ThreadPoolExecutor` with 10 workers to parallelize independent Stripe API calls:
+
+| Phase | Operation | Strategy |
+|-------|-----------|----------|
+| Cleanup | Delete existing test clocks | Parallel deletion via thread pool |
+| Phase 1 | Create clocks + customers | All 34 batches run concurrently. Each batch (1 clock + 3 customers) runs sequentially within a single thread, but all 34 batches execute in parallel across threads. |
+| Phases 2–7 | Advance clocks | All 34 `TestClock.advance` calls fire in parallel |
+| Phases 2–7 | Wait for clocks | Batch polling — one loop checks all clocks each iteration rather than waiting for each clock individually |
+
+Customer indices are pre-assigned per batch before thread dispatch so threads don't share mutable state. Results are sorted by batch number after completion for deterministic ordering.
+
 ## API Calls
 
-Rate-limited at 4 requests/second (0.25s sleep between calls). Clock advances include a 5-minute timeout to handle Stripe slowness gracefully.
+Rate-limited at 4 requests/second (0.25s sleep between sequential calls within a thread). Clock advances include a 5-minute timeout to handle Stripe slowness gracefully. The thread pool caps concurrent requests at 10 to stay within Stripe's test-mode rate limits.

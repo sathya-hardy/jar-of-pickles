@@ -53,9 +53,22 @@ Stripe Test Mode → generate_data.py (test clocks + snapshots)
 - **15 upgrades** — plan tier changes or screen count increases
 - **2 downgrades** — plan tier decreases
 - **8 cancellations** — weighted toward Free/Standard tiers
-- **5 past due** — payment method switched to a declining card, causing Stripe to set the subscription to `past_due` on the next billing cycle
+- **5 past due** — payment method switched to Stripe test card `4000 0000 0000 0341` (attaches successfully but declines on charge), causing Stripe to set the subscription to `past_due` on the next billing cycle
 
 Changes are spread across all 6 months (1 advance per month) for realistic, gradual MRR growth.
+
+## Performance
+
+`generate_data.py` uses `ThreadPoolExecutor` (10 workers) to parallelize Stripe API calls wherever possible:
+
+| Phase | Operation | Strategy |
+|-------|-----------|----------|
+| Cleanup | Delete existing test clocks | Parallel deletion via thread pool |
+| Phase 1 | Create clocks + customers | All 34 batches run concurrently (each batch: 1 clock + 3 customers, sequential within batch) |
+| Phases 2–7 | Advance clocks | All 34 clocks advanced in parallel |
+| Phases 2–7 | Wait for clocks | Batch polling — all clocks checked in a single loop rather than one at a time |
+
+This reduces total runtime from ~45 minutes (fully sequential) to ~15 minutes.
 
 ## How MRR is Calculated
 
